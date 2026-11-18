@@ -1,0 +1,27 @@
+import { useState, type FormEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowRight, BriefcaseBusiness, CheckCircle2, ChevronRight, KeyRound, LockKeyhole, ShieldCheck, Users } from 'lucide-react'
+import type { DemoRole } from '../data/demoModels'
+import { useDemo } from '../data/DemoStore'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Toast } from '../components/Layout'
+
+const roles: { role: DemoRole; icon: typeof Users; title: string; description: string }[] = [
+  { role: 'client', icon: BriefcaseBusiness, title: 'I want to hire freelancers', description: 'Post projects, compare proposals, and manage your team.' },
+  { role: 'freelancer', icon: Users, title: 'I want to find freelance work', description: 'Discover projects, submit proposals, and track earnings.' },
+]
+
+export function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
+  const { state, setRole } = useDemo()
+  const navigate = useNavigate()
+  const [selected, setSelected] = useState<DemoRole>('freelancer')
+  function continueAs(role: DemoRole) { setRole(role); navigate(`/dashboard/${role}`) }
+  return <div className="auth-page auth-page-new"><div className="auth-card panel"><span className="auth-icon"><LockKeyhole size={23}/></span><span className="eyebrow">KAAMDHAAM DEMO ACCESS</span><h1>{mode === 'login' ? 'Welcome back.' : 'Make room for good work.'}</h1><p>{mode === 'login' ? 'Choose a demo account to explore the full marketplace.' : 'Choose how you would like to use KaamDhaam. This is a browser-only prototype.'}</p>{mode === 'signup' && <div className="role-selection">{roles.map(item => { const Icon = item.icon; return <button key={item.role} className={selected === item.role ? 'selected' : ''} onClick={() => setSelected(item.role)}><Icon size={20}/><span><strong>{item.title}</strong><small>{item.description}</small></span><span className="role-radio">{selected === item.role && <CheckCircle2 size={18}/>}</span></button> })}</div>}<div className="demo-login-options">{mode === 'signup' ? <Button className="full-width" onClick={() => continueAs(selected)}>Continue as {selected} <ArrowRight size={16}/></Button> : <>{(['freelancer', 'client', 'admin'] as DemoRole[]).map(role => <button key={role} onClick={() => continueAs(role)}><span className="demo-option-icon">{role === 'admin' ? <ShieldCheck size={18}/> : role === 'client' ? <BriefcaseBusiness size={18}/> : <Users size={18}/>}</span><span><strong>Continue as {role}</strong><small>{role === 'freelancer' ? 'Aarav Mehta · find work' : role === 'client' ? 'Nira Skincare · hire talent' : 'Marketplace operations demo'}</small></span><ChevronRight size={16}/></button>)}</>}</div><div className="auth-switch">{mode === 'login' ? <>New here? <Link to="/signup">Choose an account type</Link></> : <>Already exploring? <Link to="/login">Demo login</Link></>}</div><div className="auth-demo-note"><ShieldCheck size={16}/> No real login, passwords, or identity checks. Everything stays in your browser.</div>{state.role && <p className="auth-current-role">Current session: {state.role}. Choosing another role switches the demo view.</p>}<Link className="auth-minor-link" to="/forgot-password">See password recovery mockup</Link></div></div>
+}
+
+export function ChooseRolePage() { return <AuthPage mode="signup"/> }
+
+export function ForgotPasswordPage() { const navigate = useNavigate(); return <div className="auth-page auth-page-new"><div className="auth-card panel"><span className="auth-icon"><KeyRound size={23}/></span><span className="eyebrow">SECURITY UI PREVIEW</span><h1>Reset access.</h1><p>This screen shows the planned recovery experience. No account, email, SMS, or recovery service is connected.</p><div className="recovery-demo-address"><span>Example address</span><strong>demo@kaamdham.example</strong></div><Button className="full-width" onClick={() => navigate('/verify-otp')}>Preview verification step <ArrowRight size={16}/></Button><div className="auth-switch"><Link to="/login">Back to demo login</Link></div></div></div> }
+
+export function VerifyOtpPage() { const [code, setCode] = useState(''); const [message, setMessage] = useState(''); const [done, setDone] = useState(false); const navigate = useNavigate(); function submit(event: FormEvent) { event.preventDefault(); if (code !== '123456') { setMessage('Use the sample code 123456 for this UI demo.'); return } setDone(true) } return <div className="auth-page auth-page-new"><div className="auth-card panel"><span className="auth-icon"><ShieldCheck size={23}/></span><span className="eyebrow">VERIFICATION MOCKUP</span><h1>{done ? 'Sample code accepted.' : 'Enter the sample code.'}</h1><p>{done ? 'This is a visual confirmation only. No account was verified.' : 'No code has been sent. Use 123456 to preview the next state.'}</p>{done ? <Button className="full-width" onClick={() => navigate('/login')}>Return to demo login <ArrowRight size={16}/></Button> : <form onSubmit={submit} className="otp-form"><label>Six-digit sample code<Input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))}/></label><Button type="submit" className="full-width">Verify sample code</Button></form>}<div className="auth-demo-note"><ShieldCheck size={16}/> No real OTP or identity verification occurs.</div></div>{message && <Toast message={message} onClose={() => setMessage('')}/>}</div> }

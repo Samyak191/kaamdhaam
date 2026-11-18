@@ -62,7 +62,7 @@ export interface Freelancer {
 export const freelancers: Freelancer[] = [
   { id: 'aarav-mehta', name: 'Aarav Mehta', title: 'Full Stack Developer', location: 'Bengaluru, India', rate: '₹1,500/hr', rating: '4.9', projects: 42, skills: ['React', 'Node.js', 'TypeScript'], color: '#DDEFE7', initials: 'AM' },
   { id: 'priya-shah', name: 'Priya Shah', title: 'Brand & UI Designer', location: 'Mumbai, India', rate: '₹1,200/hr', rating: '5.0', projects: 36, skills: ['Figma', 'Branding', 'UI/UX'], color: '#F5E9DC', initials: 'PS' },
-  { id: 'kabir-khan', name: 'Kabir Khan', title: 'Growth Marketing Specialist', location: 'Delhi, India', rate: '₹1,000/hr', rating: '4.8', projects: 28, skills: ['SEO', 'Analytics', 'Ads'], color: '#E6ECF5', initials: 'KK' },
+  { id: 'kabir-khan', name: 'Kabir Khan', title: 'Video Editor & Motion Designer', location: 'Mumbai, India', rate: '₹1,100/hr', rating: '4.8', projects: 28, skills: ['Premiere Pro', 'After Effects', 'Motion Graphics'], color: '#E6ECF5', initials: 'KK' },
   { id: 'neha-iyer', name: 'Neha Iyer', title: 'Data Analyst & BI Consultant', location: 'Chennai, India', rate: '₹1,350/hr', rating: '4.9', projects: 31, skills: ['Power BI', 'SQL', 'Python'], color: '#F0E9F3', initials: 'NI' },
 ]
 
