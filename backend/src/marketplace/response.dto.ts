@@ -36,6 +36,8 @@ export class ProposalMilestoneResponseDto {
 export class ProposalResponseDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) jobId!: string;
+  @ApiPropertyOptional() jobTitle?: string;
+  @ApiPropertyOptional() jobStatus?: string;
   @ApiProperty({ format: 'uuid' }) freelancerUserId!: string;
   @ApiProperty() coverLetter!: string;
   @ApiProperty({ example: '200000' }) bidPaise!: string;

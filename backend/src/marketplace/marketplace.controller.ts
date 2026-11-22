@@ -44,6 +44,8 @@ export class MyMarketplaceController {
   constructor(private readonly market: MarketplaceService) {}
   @Get('jobs') @ApiOperation({ summary: 'Jobs in organizations where I am a member' }) @ApiResponse({ status: 200, type: JobPageResponseDto })
   jobs(@CurrentUser() user: Principal, @Query() page: PageQuery) { return this.market.myJobs(user.id, page.limit, page.offset); }
+  @Get('jobs/:id') @ApiOperation({ summary: 'Owner reads own draft or published job' }) @ApiResponse({ status: 200, type: JobResponseDto }) @ApiResponse({ status: 404 })
+  job(@CurrentUser() user: Principal, @Param('id', ParseUUIDPipe) id: string) { return this.market.myJob(user.id, id); }
   @Get('proposals') @ApiOperation({ summary: 'My private proposals' }) @ApiResponse({ status: 200, type: ProposalPageResponseDto })
   proposals(@CurrentUser() user: Principal, @Query() page: PageQuery) { return this.market.myProposals(user.id, page.limit, page.offset); }
   @Patch('skills') @ApiBody({ type: SkillNamesDto }) @ApiOperation({ summary: 'Set my normalized freelancer skills' }) @ApiResponse({ status: 200 })

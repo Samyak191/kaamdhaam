@@ -6,7 +6,7 @@ import { notifyOwners, notifyUser } from '../notifications/notification-writer';
 
 const txOptions = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 15000 };
 const jobInclude = { skills: { include: { skill: true } }, organization: { select: { id: true, name: true, slug: true } } } as const;
-const proposalInclude = { milestones: { orderBy: { sequence: 'asc' as const } } } as const;
+const proposalInclude = { milestones: { orderBy: { sequence: 'asc' as const } }, job: { select: { title: true, status: true } } } as const;
 const normalizeSkill = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
 const money = (amount: bigint) => amount.toString();
 
@@ -43,7 +43,7 @@ export class MarketplaceService {
       skills: job.skills.map((x: any) => x.skill.name) };
   }
   private proposalView(proposal: any) {
-    return { id: proposal.id, jobId: proposal.jobId, freelancerUserId: proposal.freelancerUserId,
+    return { id: proposal.id, jobId: proposal.jobId, jobTitle: proposal.job.title, jobStatus: proposal.job.status, freelancerUserId: proposal.freelancerUserId,
       coverLetter: proposal.coverLetter, bidPaise: money(proposal.bidPaise), deliveryDays: proposal.deliveryDays,
       status: proposal.status, createdAt: proposal.createdAt,
       milestones: proposal.milestones.map((x: any) => ({ id: x.id, sequence: x.sequence, title: x.title, amountPaise: money(x.amountPaise) })) };
@@ -159,6 +159,12 @@ export class MarketplaceService {
     const where: Prisma.JobWhereInput = { organization: { members: { some: { userId } } } };
     const [items, total] = await this.db.$transaction([this.db.job.findMany({ where, include: jobInclude, orderBy: { createdAt: 'desc' }, take: limit, skip: offset }), this.db.job.count({ where })]);
     return { items: items.map(x => this.jobView(x)), total, limit, offset };
+  }
+  async myJob(userId: string, id: string) {
+    const job = await this.db.job.findUnique({ where: { id }, include: jobInclude });
+    if (!job) throw new NotFoundException('Job not found');
+    await this.member(userId, job.organizationId, true);
+    return this.jobView(job);
   }
   async submitProposal(userId: string, jobId: string, input: SubmitProposalDto) {
     await this.role(userId, UserRole.FREELANCER);

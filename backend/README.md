@@ -1,6 +1,6 @@
 ﻿# KaamDhaam API — authentication and marketplace
 
-NestJS 11 REST API under `/v1`. Local PostgreSQL 17 owns application identities, organizations, jobs, proposals, contracts and audit records. Supabase Auth owns passwords and sessions. The React demo frontend is separate and unchanged.
+NestJS 11 REST API under `/v1`. Local PostgreSQL 17 owns application identities, organizations, jobs, proposals, contracts and audit records. Supabase Auth owns passwords and sessions. The original React demo frontend remains unchanged.
 
 ## Local setup (PowerShell)
 
@@ -44,6 +44,7 @@ Public reads return only OPEN jobs and complete, active freelancer profiles. Lis
 | PATCH | `/v1/jobs/:id` | OWNER edits DRAFT only |
 | POST | `/v1/jobs/:id/publish` | OWNER atomically moves DRAFT to OPEN |
 | GET | `/v1/me/jobs` | CLIENT lists member-organization jobs |
+| GET | `/v1/me/jobs/:id` | OWNER reads a private draft or published job |
 | POST | `/v1/jobs/:id/proposals` | FREELANCER submits one proposal to an OPEN job |
 | GET | `/v1/me/proposals` | FREELANCER lists own private proposals |
 | GET | `/v1/jobs/:id/proposals` | Organization member lists its private job proposals |
@@ -83,4 +84,4 @@ Contract conversations are private to the assigned freelancer and current organi
 
 In-app notifications are persisted transactionally for proposals, hiring, messages, milestones and contract completion/cancellation. Deduplication keys prevent retry duplicates. `GET /v1/me/notifications`, `GET /v1/me/notifications/unread-count`, `POST /v1/me/notifications/:id/read` and `POST /v1/me/notifications/read-all` are private to the recipient. Notification metadata has entity IDs and safe fields, never message bodies. No email, SMS or browser push is sent.
 
-Current MVP limits: no payment processing, organization invites, proposal withdrawal or frontend API wiring. Search uses bounded offset pagination and case-insensitive substring matching; use cursor pagination and appropriate text indexes before very large datasets. Skills are normalized on write and limited to ten per profile/job, but the catalog has no moderation workflow. Audit and message retention need a production policy. The old isolated local Supabase CLI stack in ignored `tmp` remains stopped because its database port did not bind to localhost; the hosted dedicated development project is used for Auth verification instead.
+Current MVP limits: no payment processing, organization invites, proposal withdrawal, pre-hire messaging or frontend API wiring. The frontend remains in its original demo mode by user request. Search uses bounded offset pagination and case-insensitive substring matching; use cursor pagination and appropriate text indexes before very large datasets. Skills are normalized on write and limited to ten per profile/job, but the catalog has no moderation workflow. Audit and message retention need a production policy. The old isolated local Supabase CLI stack in ignored `tmp` remains stopped because its database port did not bind to localhost; the hosted dedicated development project is used for Auth verification instead.

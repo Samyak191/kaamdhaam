@@ -101,6 +101,8 @@ describe('Marketplace API with PostgreSQL', () => {
     const created = await request(app.getHttpServer()).post('/v1/jobs').set('Authorization', owner).send({ organizationId: orgId, title: 'Build an API', description: 'Build a secure backend API for a real marketplace.', budgetPaise: 250000, skills: ['NestJS'] }).expect(201);
     jobId = created.body.id;
     expect(created.body.status).toBe('DRAFT');
+    expect((await request(app.getHttpServer()).get(`/v1/me/jobs/${jobId}`).set('Authorization', owner).expect(200)).body.id).toBe(jobId);
+    await request(app.getHttpServer()).get(`/v1/me/jobs/${jobId}`).set('Authorization', outsider).expect(404);
     expect((await request(app.getHttpServer()).get('/v1/jobs').expect(200)).body.items.some((x: any) => x.id === jobId)).toBe(false);
     await request(app.getHttpServer()).get(`/v1/jobs/${jobId}`).expect(404);
     await request(app.getHttpServer()).patch(`/v1/jobs/${jobId}`).set('Authorization', outsider).send({ title: 'Stolen job' }).expect(404);
