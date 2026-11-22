@@ -1,0 +1,16 @@
+node_modules/
+dist/
+src/generated/
+coverage/
+tmp/
+*.log
+*.pem
+*.key
+*.p12
+*.dump
+*.sql.gz
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

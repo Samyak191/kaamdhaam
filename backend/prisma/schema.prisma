@@ -1,0 +1,276 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  CLIENT
+  FREELANCER
+}
+
+enum MembershipRole {
+  OWNER
+  MEMBER
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  HIRED
+  COMPLETED
+  CANCELLED
+}
+enum ProposalStatus {
+  SUBMITTED
+  SHORTLISTED
+  REJECTED
+  WITHDRAWN
+  HIRED
+}
+enum ContractStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+enum MilestoneStatus {
+  PLANNED
+  COMPLETED
+}
+
+model User {
+  id           String              @id @default(uuid()) @db.Uuid
+  authSubject  String              @unique @map("auth_subject") @db.Uuid
+  displayName  String?             @map("display_name") @db.VarChar(120)
+  status       UserStatus          @default(ACTIVE)
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  roles        UserRoleAssignment[]
+  profile      FreelancerProfile?
+  createdOrgs  ClientOrganization[] @relation("OrganizationCreator")
+  memberships  OrganizationMember[]
+  adminGrants  AdminGrant[]        @relation("AdminGrantee")
+  grantsGiven  AdminGrant[]        @relation("AdminGrantor")
+  auditLogs    AuditLog[]
+  jobsCreated  Job[] @relation("JobCreator")
+  proposals    Proposal[]
+  contracts    Contract[]
+  hireRequests HireRequest[]
+  @@map("users")
+}
+
+model UserRoleAssignment {
+  userId    String   @map("user_id") @db.Uuid
+  role      UserRole
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@id([userId, role])
+  @@map("user_roles")
+}
+
+model AdminGrant {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  grantedBy  String    @map("granted_by") @db.Uuid
+  grantedAt  DateTime  @default(now()) @map("granted_at")
+  revokedAt  DateTime? @map("revoked_at")
+  user       User      @relation("AdminGrantee", fields: [userId], references: [id], onDelete: Restrict)
+  grantor    User      @relation("AdminGrantor", fields: [grantedBy], references: [id], onDelete: Restrict)
+  @@index([userId, revokedAt])
+  @@map("admin_grants")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  action      String   @db.VarChar(80)
+  entityType  String   @map("entity_type") @db.VarChar(80)
+  entityId    String   @map("entity_id") @db.Uuid
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  @@index([actorUserId, createdAt])
+  @@map("audit_logs")
+}
+
+model FreelancerProfile {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @unique @map("user_id") @db.Uuid
+  headline      String?  @db.VarChar(160)
+  bio           String?  @db.VarChar(2000)
+  locationCity  String?  @map("location_city") @db.VarChar(100)
+  locationState String?  @map("location_state") @db.VarChar(100)
+  countryCode   String   @default("IN") @map("country_code") @db.Char(2)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  skills        FreelancerSkill[]
+  @@index([locationCity, locationState])
+  @@index([createdAt, id])
+  @@map("freelancer_profiles")
+}
+
+model ClientOrganization {
+  id              String               @id @default(uuid()) @db.Uuid
+  name            String               @db.VarChar(160)
+  slug            String               @unique @db.VarChar(180)
+  createdByUserId String               @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  creator         User                 @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members         OrganizationMember[]
+  jobs            Job[]
+  contracts       Contract[]
+  @@index([createdByUserId])
+  @@map("client_organizations")
+}
+
+model OrganizationMember {
+  organizationId String             @map("organization_id") @db.Uuid
+  userId         String             @map("user_id") @db.Uuid
+  membershipRole MembershipRole     @map("membership_role")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  organization   ClientOrganization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@id([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+model Skill {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at")
+  freelancers FreelancerSkill[]
+  jobs JobSkill[]
+  @@map("skills")
+}
+
+model FreelancerSkill {
+  profileId String @map("profile_id") @db.Uuid
+  skillId String @map("skill_id") @db.Uuid
+  profile FreelancerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  @@id([profileId, skillId])
+  @@index([skillId])
+  @@map("freelancer_skills")
+}
+
+model Job {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  createdByUserId String @map("created_by_user_id") @db.Uuid
+  title String @db.VarChar(160)
+  description String @db.VarChar(10000)
+  budgetPaise BigInt @map("budget_paise")
+  status JobStatus @default(DRAFT)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  publishedAt DateTime? @map("published_at")
+  deadline DateTime?
+  organization ClientOrganization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  creator User @relation("JobCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  skills JobSkill[]
+  proposals Proposal[]
+  contract Contract?
+  @@index([status, publishedAt, id])
+  @@index([status, budgetPaise])
+  @@index([organizationId, createdAt])
+  @@map("jobs")
+}
+
+model JobSkill {
+  jobId String @map("job_id") @db.Uuid
+  skillId String @map("skill_id") @db.Uuid
+  job Job @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Restrict)
+  @@id([jobId, skillId])
+  @@index([skillId])
+  @@map("job_skills")
+}
+
+model Proposal {
+  id String @id @default(uuid()) @db.Uuid
+  jobId String @map("job_id") @db.Uuid
+  freelancerUserId String @map("freelancer_user_id") @db.Uuid
+  coverLetter String @map("cover_letter") @db.VarChar(5000)
+  bidPaise BigInt @map("bid_paise")
+  deliveryDays Int @map("delivery_days")
+  status ProposalStatus @default(SUBMITTED)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  job Job @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  freelancer User @relation(fields: [freelancerUserId], references: [id], onDelete: Restrict)
+  milestones ProposalMilestone[]
+  contract Contract?
+  @@unique([jobId, freelancerUserId])
+  @@index([freelancerUserId, createdAt])
+  @@index([jobId, status])
+  @@map("proposals")
+}
+
+model ProposalMilestone {
+  id String @id @default(uuid()) @db.Uuid
+  proposalId String @map("proposal_id") @db.Uuid
+  sequence Int
+  title String @db.VarChar(160)
+  amountPaise BigInt @map("amount_paise")
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  @@unique([proposalId, sequence])
+  @@map("proposal_milestones")
+}
+
+model Contract {
+  id String @id @default(uuid()) @db.Uuid
+  jobId String @unique @map("job_id") @db.Uuid
+  proposalId String @unique @map("proposal_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  freelancerUserId String @map("freelancer_user_id") @db.Uuid
+  agreedPaise BigInt @map("agreed_paise")
+  status ContractStatus @default(ACTIVE)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  job Job @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  organization ClientOrganization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  freelancer User @relation(fields: [freelancerUserId], references: [id], onDelete: Restrict)
+  milestones ContractMilestone[]
+  hireRequests HireRequest[]
+  @@index([organizationId, createdAt])
+  @@index([freelancerUserId, createdAt])
+  @@map("contracts")
+}
+
+model ContractMilestone {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  sequence Int
+  title String @db.VarChar(160)
+  amountPaise BigInt @map("amount_paise")
+  status MilestoneStatus @default(PLANNED)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@unique([contractId, sequence])
+  @@map("contract_milestones")
+}
+
+model HireRequest {
+  id String @id @default(uuid()) @db.Uuid
+  actorUserId String @map("actor_user_id") @db.Uuid
+  key String @db.VarChar(128)
+  proposalId String @map("proposal_id") @db.Uuid
+  contractId String @map("contract_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  @@unique([actorUserId, key])
+  @@map("hire_requests")
+}
