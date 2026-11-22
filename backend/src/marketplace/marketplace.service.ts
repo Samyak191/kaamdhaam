@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, UserRole } from '../generated/prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { CreateJobDto, EditJobDto, FreelancerQuery, JobQuery, JobSort, SubmitProposalDto } from './dto';
+import { notifyOwners, notifyUser } from '../notifications/notification-writer';
 
 const txOptions = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 15000 };
 const jobInclude = { skills: { include: { skill: true } }, organization: { select: { id: true, name: true, slug: true } } } as const;
@@ -173,6 +174,7 @@ export class MarketplaceService {
         const created = await tx.proposal.create({ data: { jobId, freelancerUserId: userId, coverLetter: input.coverLetter.trim(), bidPaise: BigInt(input.bidPaise), deliveryDays: input.deliveryDays,
           milestones: { create: (input.milestones || []).map((m, i) => ({ sequence: i + 1, title: m.title.trim(), amountPaise: BigInt(m.amountPaise) })) } } });
         await tx.auditLog.create({ data: { actorUserId: userId, action: 'PROPOSAL_SUBMITTED', entityType: 'proposal', entityId: created.id, metadata: { jobId } } });
+        await notifyOwners(tx, job.organizationId, 'PROPOSAL_RECEIVED', 'proposal', created.id, { jobId });
         return tx.proposal.findUniqueOrThrow({ where: { id: created.id }, include: proposalInclude });
       }, txOptions);
       return this.proposalView(proposal);
@@ -200,6 +202,7 @@ export class MarketplaceService {
       const changed = await tx.proposal.updateMany({ where: { id, status: target === 'SHORTLISTED' ? 'SUBMITTED' : { in: ['SUBMITTED', 'SHORTLISTED'] }, job: { status: 'OPEN' } }, data: { status: target } });
       if (!changed.count) throw new ConflictException('Invalid proposal transition');
       await tx.auditLog.create({ data: { actorUserId: userId, action: `PROPOSAL_${target}`, entityType: 'proposal', entityId: id, metadata: {} } });
+      await notifyUser(tx, proposal.freelancerUserId, target === 'SHORTLISTED' ? 'PROPOSAL_SHORTLISTED' : 'PROPOSAL_REJECTED', 'proposal', id, { jobId: proposal.jobId });
       return this.proposalView(await tx.proposal.findUniqueOrThrow({ where: { id }, include: proposalInclude }));
     }, txOptions);
   }
@@ -225,9 +228,12 @@ export class MarketplaceService {
           await tx.proposal.update({ where: { id: proposalId }, data: { status: 'HIRED' } });
           const created = await tx.contract.create({ data: { jobId: selected.jobId, proposalId, organizationId: proposal.job.organizationId,
             freelancerUserId: selected.freelancerUserId, agreedPaise: selected.bidPaise,
-            milestones: { create: selected.milestones.map(m => ({ sequence: m.sequence, title: m.title, amountPaise: m.amountPaise })) } }, include: { milestones: { orderBy: { sequence: 'asc' } } } });
+            milestones: { create: selected.milestones.length ? selected.milestones.map(m => ({ sequence: m.sequence, title: m.title, amountPaise: m.amountPaise })) : [{ sequence: 1, title: 'Project delivery', amountPaise: selected.bidPaise }] } }, include: { milestones: { orderBy: { sequence: 'asc' } } } });
+          await tx.conversation.create({ data: { contractId: created.id, organizationId: proposal.job.organizationId, freelancerUserId: selected.freelancerUserId } });
           await tx.hireRequest.create({ data: { actorUserId: userId, key, proposalId, contractId: created.id } });
           await tx.auditLog.create({ data: { actorUserId: userId, action: 'PROPOSAL_HIRED', entityType: 'contract', entityId: created.id, metadata: { jobId: selected.jobId, proposalId } } });
+          await notifyUser(tx, selected.freelancerUserId, 'FREELANCER_HIRED', 'contract', created.id, { jobId: selected.jobId });
+          await notifyOwners(tx, proposal.job.organizationId, 'CONTRACT_CREATED', 'contract', created.id, { jobId: selected.jobId });
           return created;
         }, txOptions);
         return this.contractView(contract);

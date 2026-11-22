@@ -45,7 +45,20 @@ export class ProposalResponseDto {
   @ApiProperty({ type: [ProposalMilestoneResponseDto] }) milestones!: ProposalMilestoneResponseDto[];
 }
 export class ContractMilestoneResponseDto extends ProposalMilestoneResponseDto {
-  @ApiProperty({ enum: ['PLANNED', 'COMPLETED'] }) status!: string;
+  @ApiProperty({ enum: ['PLANNED', 'SUBMITTED', 'REVISION_REQUESTED', 'APPROVED', 'CANCELLED', 'COMPLETED'] }) status!: string;
+  @ApiPropertyOptional() revisionNumber?: number;
+  @ApiPropertyOptional({ nullable: true }) submittedAt?: Date | null;
+  @ApiPropertyOptional({ nullable: true }) approvedAt?: Date | null;
+  @ApiPropertyOptional({ type: () => [MilestoneSubmissionResponseDto] }) submissions?: MilestoneSubmissionResponseDto[];
+}
+export class MilestoneSubmissionResponseDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() revisionNumber!: number;
+  @ApiProperty() description!: string;
+  @ApiPropertyOptional({ nullable: true }) deliverableUrl?: string | null;
+  @ApiProperty() submittedAt!: Date;
+  @ApiPropertyOptional({ nullable: true }) revisionReason?: string | null;
+  @ApiPropertyOptional({ nullable: true }) revisionRequestedAt?: Date | null;
 }
 export class ContractResponseDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
@@ -56,6 +69,12 @@ export class ContractResponseDto {
   @ApiProperty({ example: '200000' }) agreedPaise!: string;
   @ApiProperty({ enum: ['ACTIVE', 'COMPLETED', 'CANCELLED'] }) status!: string;
   @ApiProperty() createdAt!: Date;
+  @ApiPropertyOptional() jobTitle?: string;
+  @ApiPropertyOptional({ type: PublicOrganizationDto }) organization?: PublicOrganizationDto;
+  @ApiPropertyOptional({ format: 'uuid' }) conversationId?: string;
+  @ApiPropertyOptional({ nullable: true }) completedAt?: Date | null;
+  @ApiPropertyOptional({ nullable: true }) cancelledAt?: Date | null;
+  @ApiPropertyOptional({ nullable: true }) cancellationReason?: string | null;
   @ApiProperty({ type: [ContractMilestoneResponseDto] }) milestones!: ContractMilestoneResponseDto[];
 }
 export class JobPageResponseDto {

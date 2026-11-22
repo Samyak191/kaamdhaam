@@ -68,7 +68,14 @@ describe('Marketplace API with PostgreSQL', () => {
         const jids = jobs.map(x => x.id);
         const contracts = await db.contract.findMany({ where: { jobId: { in: jids } }, select: { id: true } });
         const cids = contracts.map(x => x.id);
+        const conversations = await db.conversation.findMany({ where: { contractId: { in: cids } }, select: { id: true } });
+        const conversationIds = conversations.map(x => x.id);
+        await db.conversationRead.deleteMany({ where: { conversationId: { in: conversationIds } } });
+        await db.message.deleteMany({ where: { conversationId: { in: conversationIds } } });
+        await db.conversation.deleteMany({ where: { id: { in: conversationIds } } });
+        await db.notification.deleteMany({ where: { recipientUserId: { in: ids } } });
         await db.hireRequest.deleteMany({ where: { contractId: { in: cids } } });
+        await db.milestoneSubmission.deleteMany({ where: { milestone: { contractId: { in: cids } } } });
         await db.contractMilestone.deleteMany({ where: { contractId: { in: cids } } });
         await db.contract.deleteMany({ where: { id: { in: cids } } });
         await db.proposalMilestone.deleteMany({ where: { proposalId: { in: pids } } });
@@ -135,8 +142,10 @@ describe('Marketplace API with PostgreSQL', () => {
     const winner = a.status === 201 ? a : b;
     const winnerId = a.status === 201 ? proposalAId : proposalBId;
     const key = winnerId === proposalAId ? (a.request.getHeader('Idempotency-Key') as string) : (b.request.getHeader('Idempotency-Key') as string);
+    const notificationCount = await db.notification.count({ where: { relatedEntityId: winner.body.id } });
     const retry = await request(app.getHttpServer()).post(`/v1/proposals/${winnerId}/hire`).set('Authorization', owner).set('Idempotency-Key', key).expect(201);
     expect(retry.body.id).toBe(winner.body.id);
+    expect(await db.notification.count({ where: { relatedEntityId: winner.body.id } })).toBe(notificationCount);
     await request(app.getHttpServer()).post(`/v1/proposals/${winnerId === proposalAId ? proposalBId : proposalAId}/hire`).set('Authorization', owner).set('Idempotency-Key', key).expect(409);
     expect(await db.contract.count({ where: { jobId } })).toBe(1);
     expect(await db.contractMilestone.count({ where: { contractId: winner.body.id } })).toBe(1);
@@ -152,5 +161,89 @@ describe('Marketplace API with PostgreSQL', () => {
     const otherProposalId = contract.proposalId === proposalAId ? proposalBId : proposalAId;
     await expect(db.contract.create({ data: { jobId, proposalId: otherProposalId, organizationId: orgId, freelancerUserId: contract.freelancerUserId, agreedPaise: 200000n } })).rejects.toThrow();
     expect(await db.contract.count({ where: { jobId } })).toBe(1);
+  });
+  it('keeps contract messages private, ordered, unread, and explicit-read', async () => {
+    const contract = await db.contract.findUniqueOrThrow({ where: { jobId }, include: { conversation: true } });
+    const conversationId = contract.conversation!.id;
+    const freelancer = await bearer(contract.freelancerUserId === ids[1] ? 1 : 2);
+    const owner = await bearer(0); const outsider = await bearer(3);
+    await request(app.getHttpServer()).get(`/v1/contracts/${contract.id}`).set('Authorization', outsider).expect(404);
+    await request(app.getHttpServer()).get(`/v1/conversations/${conversationId}/messages`).set('Authorization', outsider).expect(404);
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer()).post(`/v1/conversations/${conversationId}/messages`).set('Authorization', owner).send({ body: 'Welcome to the project.' }),
+      request(app.getHttpServer()).post(`/v1/conversations/${conversationId}/messages`).set('Authorization', owner).send({ body: 'Please share a first update.' }),
+    ]);
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect(new Set([first.body.sequence, second.body.sequence]).size).toBe(2);
+    await request(app.getHttpServer()).post(`/v1/conversations/${conversationId}/messages`).set('Authorization', outsider).send({ body: 'Impersonation attempt' }).expect(404);
+    await request(app.getHttpServer()).post(`/v1/conversations/${conversationId}/messages`).set('Authorization', freelancer).send({ body: 'I have started the work.' }).expect(201);
+    const page = await request(app.getHttpServer()).get(`/v1/conversations/${conversationId}/messages?limit=2`).set('Authorization', freelancer).expect(200);
+    expect(page.body.items).toHaveLength(2); expect(page.body.hasMore).toBe(true);
+    expect(BigInt(page.body.items[0].sequence) > BigInt(page.body.items[1].sequence)).toBe(true);
+    const older = await request(app.getHttpServer()).get(`/v1/conversations/${conversationId}/messages?limit=2&before=${page.body.nextBefore}`).set('Authorization', freelancer).expect(200);
+    expect(older.body.items).toHaveLength(1);
+    const beforeRead = await request(app.getHttpServer()).get('/v1/me/conversations').set('Authorization', freelancer).expect(200);
+    expect(beforeRead.body.items.find((x: any) => x.id === conversationId).unreadCount).toBe(2);
+    await request(app.getHttpServer()).post(`/v1/conversations/${conversationId}/read`).set('Authorization', freelancer).send({ throughSequence: page.body.items[0].sequence }).expect(201);
+    const afterRead = await request(app.getHttpServer()).get('/v1/me/conversations').set('Authorization', freelancer).expect(200);
+    expect(afterRead.body.items.find((x: any) => x.id === conversationId).unreadCount).toBe(0);
+    expect((await db.message.findMany({ where: { conversationId }, orderBy: { sequence: 'asc' } })).map(x => x.sequence)).toEqual([1n, 2n, 3n]);
+  });
+  it('preserves revisions and completes the contract only after approval', async () => {
+    const contract = await db.contract.findUniqueOrThrow({ where: { jobId }, include: { milestones: true, conversation: true } });
+    const milestoneId = contract.milestones[0].id;
+    const freelancer = await bearer(contract.freelancerUserId === ids[1] ? 1 : 2);
+    const owner = await bearer(0);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/complete`).set('Authorization', owner).expect(409);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/submit`).set('Authorization', owner).send({ description: 'The owner cannot submit work on behalf of the freelancer.' }).expect(404);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/submit`).set('Authorization', freelancer).send({ description: 'First implementation of the agreed API deliverable.' }).expect(201);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/submit`).set('Authorization', freelancer).send({ description: 'Duplicate work submission must fail cleanly.' }).expect(409);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/approve`).set('Authorization', freelancer).expect(404);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/request-revision`).set('Authorization', owner).send({ reason: 'Please document the error handling behavior.' }).expect(201);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/cancel`).set('Authorization', owner).send({ reason: 'Cancellation after work submission is unsupported.' }).expect(409);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/submit`).set('Authorization', freelancer).send({ description: 'Revised implementation with documented error handling.' }).expect(201);
+    const [approve, revise] = await Promise.all([
+      request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/approve`).set('Authorization', owner),
+      request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/request-revision`).set('Authorization', owner).send({ reason: 'Concurrent revision request for consistency test.' }),
+    ]);
+    expect([approve.status, revise.status].sort()).toEqual([201, 409]);
+    if (revise.status === 201) {
+      await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/submit`).set('Authorization', freelancer).send({ description: 'Final resubmission after the concurrent revision.' }).expect(201);
+      await request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/milestones/${milestoneId}/approve`).set('Authorization', owner).expect(201);
+    }
+    const detail = await request(app.getHttpServer()).get(`/v1/contracts/${contract.id}`).set('Authorization', freelancer).expect(200);
+    expect(detail.body.milestones[0].submissions.length).toBeGreaterThanOrEqual(2);
+    expect(detail.body.milestones[0].submissions[0].revisionReason).toBeTruthy();
+    const [a, b] = await Promise.all([
+      request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/complete`).set('Authorization', owner),
+      request(app.getHttpServer()).post(`/v1/contracts/${contract.id}/complete`).set('Authorization', owner),
+    ]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect((await db.job.findUniqueOrThrow({ where: { id: jobId } })).status).toBe('COMPLETED');
+    expect(await db.auditLog.count({ where: { action: 'CONTRACT_COMPLETED', entityId: contract.id } })).toBe(1);
+    await request(app.getHttpServer()).post(`/v1/conversations/${contract.conversation!.id}/messages`).set('Authorization', freelancer).send({ body: 'No post-completion send.' }).expect(409);
+    await request(app.getHttpServer()).get(`/v1/conversations/${contract.conversation!.id}/messages`).set('Authorization', freelancer).expect(200);
+  });
+  it('allows only pre-submission cancellation and isolates notifications', async () => {
+    const owner = await bearer(0); const freelancer = await bearer(2); const outsider = await bearer(3);
+    const job = await request(app.getHttpServer()).post('/v1/jobs').set('Authorization', owner).send({ organizationId: orgId, title: 'Second API project', description: 'A separate project for conservative contract cancellation.', budgetPaise: 150000, skills: ['TypeScript'] }).expect(201);
+    await request(app.getHttpServer()).post(`/v1/jobs/${job.body.id}/publish`).set('Authorization', owner).expect(201);
+    const proposal = await request(app.getHttpServer()).post(`/v1/jobs/${job.body.id}/proposals`).set('Authorization', freelancer).send({ coverLetter: 'I can build this second project and deliver it carefully.', bidPaise: 140000, deliveryDays: 7 }).expect(201);
+    const hired = await request(app.getHttpServer()).post(`/v1/proposals/${proposal.body.id}/hire`).set('Authorization', owner).set('Idempotency-Key', `cancel-test-${randomUUID()}`).expect(201);
+    const contractId = hired.body.id;
+    expect((await db.conversation.count({ where: { contractId } }))).toBe(1);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contractId}/cancel`).set('Authorization', freelancer).send({ reason: 'Freelancer cannot cancel as organization owner.' }).expect(404);
+    await request(app.getHttpServer()).post(`/v1/contracts/${contractId}/cancel`).set('Authorization', owner).send({ reason: 'Mutual cancellation before any submitted work.' }).expect(201);
+    expect((await db.job.findUniqueOrThrow({ where: { id: job.body.id } })).status).toBe('CANCELLED');
+    expect((await db.contractMilestone.findFirstOrThrow({ where: { contractId } })).status).toBe('CANCELLED');
+    const notifications = await request(app.getHttpServer()).get('/v1/me/notifications').set('Authorization', freelancer).expect(200);
+    expect(notifications.body.items.some((x: any) => x.type === 'CONTRACT_CANCELLED')).toBe(true);
+    const item = notifications.body.items[0];
+    await request(app.getHttpServer()).post(`/v1/me/notifications/${item.id}/read`).set('Authorization', outsider).expect(404);
+    const unread = await request(app.getHttpServer()).get('/v1/me/notifications/unread-count').set('Authorization', freelancer).expect(200);
+    expect(unread.body.count).toBeGreaterThan(0);
+    await request(app.getHttpServer()).post(`/v1/me/notifications/${item.id}/read`).set('Authorization', freelancer).expect(201);
+    await request(app.getHttpServer()).post('/v1/me/notifications/read-all').set('Authorization', freelancer).expect(201);
+    expect((await request(app.getHttpServer()).get('/v1/me/notifications/unread-count').set('Authorization', freelancer).expect(200)).body.count).toBe(0);
   });
 });

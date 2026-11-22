@@ -45,6 +45,24 @@ enum ContractStatus {
 enum MilestoneStatus {
   PLANNED
   COMPLETED
+  SUBMITTED
+  REVISION_REQUESTED
+  APPROVED
+  CANCELLED
+}
+
+enum NotificationType {
+  PROPOSAL_RECEIVED
+  PROPOSAL_SHORTLISTED
+  PROPOSAL_REJECTED
+  FREELANCER_HIRED
+  CONTRACT_CREATED
+  MESSAGE_RECEIVED
+  MILESTONE_SUBMITTED
+  REVISION_REQUESTED
+  MILESTONE_APPROVED
+  CONTRACT_COMPLETED
+  CONTRACT_CANCELLED
 }
 
 model User {
@@ -65,6 +83,10 @@ model User {
   proposals    Proposal[]
   contracts    Contract[]
   hireRequests HireRequest[]
+  sentMessages Message[]
+  conversationReads ConversationRead[]
+  notifications Notification[]
+  freelancerConversations Conversation[] @relation("ConversationFreelancer")
   @@map("users")
 }
 
@@ -130,6 +152,7 @@ model ClientOrganization {
   members         OrganizationMember[]
   jobs            Job[]
   contracts       Contract[]
+  conversations Conversation[]
   @@index([createdByUserId])
   @@map("client_organizations")
 }
@@ -237,6 +260,9 @@ model Contract {
   freelancerUserId String @map("freelancer_user_id") @db.Uuid
   agreedPaise BigInt @map("agreed_paise")
   status ContractStatus @default(ACTIVE)
+  completedAt DateTime? @map("completed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  cancellationReason String? @map("cancellation_reason") @db.VarChar(1000)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   job Job @relation(fields: [jobId], references: [id], onDelete: Restrict)
@@ -245,6 +271,7 @@ model Contract {
   freelancer User @relation(fields: [freelancerUserId], references: [id], onDelete: Restrict)
   milestones ContractMilestone[]
   hireRequests HireRequest[]
+  conversation Conversation?
   @@index([organizationId, createdAt])
   @@index([freelancerUserId, createdAt])
   @@map("contracts")
@@ -257,7 +284,11 @@ model ContractMilestone {
   title String @db.VarChar(160)
   amountPaise BigInt @map("amount_paise")
   status MilestoneStatus @default(PLANNED)
+  revisionNumber Int @default(0) @map("revision_number")
+  submittedAt DateTime? @map("submitted_at")
+  approvedAt DateTime? @map("approved_at")
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  submissions MilestoneSubmission[]
   @@unique([contractId, sequence])
   @@map("contract_milestones")
 }
@@ -273,4 +304,78 @@ model HireRequest {
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
   @@unique([actorUserId, key])
   @@map("hire_requests")
+}
+
+model MilestoneSubmission {
+  id String @id @default(uuid()) @db.Uuid
+  milestoneId String @map("milestone_id") @db.Uuid
+  revisionNumber Int @map("revision_number")
+  description String @db.VarChar(5000)
+  deliverableUrl String? @map("deliverable_url") @db.VarChar(2048)
+  submittedAt DateTime @default(now()) @map("submitted_at")
+  revisionReason String? @map("revision_reason") @db.VarChar(2000)
+  revisionRequestedAt DateTime? @map("revision_requested_at")
+  milestone ContractMilestone @relation(fields: [milestoneId], references: [id], onDelete: Restrict)
+  @@unique([milestoneId, revisionNumber])
+  @@map("milestone_submissions")
+}
+
+model Conversation {
+  id String @id @default(uuid()) @db.Uuid
+  contractId String @unique @map("contract_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  freelancerUserId String @map("freelancer_user_id") @db.Uuid
+  lastSequence BigInt @default(0) @map("last_sequence")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  organization ClientOrganization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  freelancer User @relation("ConversationFreelancer", fields: [freelancerUserId], references: [id], onDelete: Restrict)
+  messages Message[]
+  reads ConversationRead[]
+  @@index([organizationId, updatedAt])
+  @@index([freelancerUserId, updatedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id String @id @default(uuid()) @db.Uuid
+  conversationId String @map("conversation_id") @db.Uuid
+  sequence BigInt
+  senderUserId String @map("sender_user_id") @db.Uuid
+  body String @db.VarChar(4000)
+  createdAt DateTime @default(now()) @map("created_at")
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  sender User @relation(fields: [senderUserId], references: [id], onDelete: Restrict)
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model ConversationRead {
+  conversationId String @map("conversation_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  lastReadSequence BigInt @default(0) @map("last_read_sequence")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_reads")
+}
+
+model Notification {
+  id String @id @default(uuid()) @db.Uuid
+  recipientUserId String @map("recipient_user_id") @db.Uuid
+  type NotificationType
+  relatedEntityType String @map("related_entity_type") @db.VarChar(60)
+  relatedEntityId String @map("related_entity_id") @db.Uuid
+  dedupeKey String @unique @map("dedupe_key") @db.VarChar(240)
+  metadata Json @default("{}")
+  readAt DateTime? @map("read_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Restrict)
+  @@index([recipientUserId, createdAt, id])
+  @@index([recipientUserId, readAt])
+  @@map("notifications")
 }
