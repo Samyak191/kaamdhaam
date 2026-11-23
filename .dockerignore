@@ -1,0 +1,16 @@
+node_modules
+backend
+dist
+coverage
+tmp
+.env*
+!.env.example
+deploy/backend.env
+deploy/.env
+deploy/*.dump
+docs
+.github
+scripts
+*.log
+*.tsbuildinfo
+.git
