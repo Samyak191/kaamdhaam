@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, BadRequestException, HttpException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
@@ -10,6 +10,9 @@ import { PrismaService } from '../src/database/prisma.service';
 class ErrorTestController {
   @Get('crash')
   crash(): never { throw new Error('internal detail: database password is hunter2'); }
+
+  @Get('internal-http')
+  internalHttp(): never { throw new HttpException('internal detail: database password is hunter2', 503); }
 
   @Get('typed')
   typed(): never { throw new BadRequestException({ statusCode: 400, message: ['title must be longer'], error: 'Bad Request' }); }
@@ -43,6 +46,12 @@ describe('Error handling contract (e2e)', () => {
     });
     expect(JSON.stringify(response.body)).not.toContain('hunter2');
     expect(JSON.stringify(response.body)).not.toMatch(/at .*\.ts:\d+/);
+  });
+
+  it('redacts deliberate 5xx HttpException bodies as well', async () => {
+    const response = await request(app.getHttpServer()).get('/v1/error-test/internal-http').expect(503);
+    expect(response.body.requestId).toBe(response.headers['x-request-id']);
+    expect(JSON.stringify(response.body)).not.toContain('hunter2');
   });
 
   it('keeps actionable HttpException bodies for clients', async () => {

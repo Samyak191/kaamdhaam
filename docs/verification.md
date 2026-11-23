@@ -8,7 +8,7 @@ Starting Git state: clean `main` at `61de0ef`. No push or deployment authorized.
 | --- | --- |
 | Backend typecheck, Prisma validate, migration status | Passed; five migrations, schema up to date; production build passed. |
 | Backend unit tests | **27 passed** (JWT, auth guard, env validation, identity service, health). The JWT suite's key-generation hook timed out once at Jest's 5 s default while a frontend build ran concurrently; the hook timeout is now 30 s and the suite passes. |
-| Backend HTTP tests | **10 passed**: security headers, 413 body cap, CORS allowlist, 429 throttling, 404, error contract (generic 500 without internals, HttpException bodies preserved, malformed JSON, no X-Powered-By). |
+| Backend HTTP tests | **11 passed**: security headers, 413 body cap, CORS allowlist, 429 throttling, 404, error contract (generic 5xx without internals, actionable 4xx preserved, malformed JSON, no X-Powered-By). |
 | PostgreSQL integration tests | **13 passed** on the test container (identity 6, marketplace 7). |
 | Frontend typecheck, demo service tests, production build | Passed. `index` 247.66 kB raw / 77.91 kB gzip; `LiveApp` 251.42 kB raw / 66.05 kB gzip; no 500 kB warning. |
 | Live browser smoke (Chrome headless against Vite + restarted API) | **7 passed**: homepage, public jobs, public talent, protected redirect, signup form, mobile job and talent filters. |

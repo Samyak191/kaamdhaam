@@ -6,10 +6,9 @@ interface JsonResponse { status(code: number): { json(body: unknown): void } }
 interface HttpLikeError { statusCode?: unknown; status?: unknown; message?: unknown; name?: unknown; stack?: unknown }
 
 /**
- * Stable API error contract. Nest `HttpException`s (validation, 401/403/404/409/429) keep their
- * existing bodies so actionable messages still reach users. Anything else becomes a generic
- * HTTP 500 (or the status a framework error such as body-parser's 413 already carries) and the
- * real cause is logged server-side with the request ID only. No stack trace ever leaves the process.
+ * Stable API error contract. Expected 4xx HttpExceptions keep actionable validation messages.
+ * All 5xx responses use a generic body, including deliberately thrown HttpExceptions. Only
+ * error class and safe code are logged with the request ID; no raw error text or stack is logged.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -24,7 +23,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const body = exception.getResponse();
-      if (status >= 500) this.logServerError(exception, requestId);
+      if (status >= 500) {
+        this.logServerError(exception, requestId);
+        response.status(status).json(this.internalError(status, requestId));
+        return;
+      }
       response.status(status).json(typeof body === 'string' ? { statusCode: status, message: body } : body);
       return;
     }
@@ -33,12 +36,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const carried = Number(error.statusCode ?? error.status);
     const status = Number.isInteger(carried) && carried >= 400 && carried < 600 ? carried : HttpStatus.INTERNAL_SERVER_ERROR;
     if (status >= 500) this.logServerError(exception, requestId);
-    response.status(status).json({
+    response.status(status).json(status >= 500 ? this.internalError(status, requestId) : {
       statusCode: status,
-      error: status >= 500 ? 'Internal Server Error' : 'Bad Request',
-      message: status >= 500 ? 'Unexpected server error. Quote the X-Request-Id header when reporting this.' : 'Request could not be processed.',
+      error: 'Bad Request',
+      message: 'Request could not be processed.',
       requestId,
     });
+  }
+
+  private internalError(status: number, requestId: string | null) {
+    return { statusCode: status, error: 'Internal Server Error',
+      message: 'Unexpected server error. Quote the X-Request-Id header when reporting this.', requestId };
   }
 
   private logServerError(exception: unknown, requestId: string | null): void {
@@ -47,7 +55,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       event: 'unhandled_error',
       requestId,
       name: typeof error.name === 'string' ? error.name : typeof exception,
-      message: typeof error.message === 'string' ? error.message : String(exception),
-    }), typeof error.stack === 'string' ? error.stack : undefined);
+      code: typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : undefined,
+    }));
   }
 }

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtVerifierService } from './jwt-verifier.service';
 
 describe('Supabase JWT verification', () => {
+  jest.setTimeout(30000);
   const subject = '6ce06c2d-1678-4d43-84bc-74cb587ab2cf';
   let server: Server;
   let privateKey: KeyLike;
