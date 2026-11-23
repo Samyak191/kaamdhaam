@@ -2,6 +2,8 @@ import React, { lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DemoProvider } from './data/DemoStore'
+import { liveMode } from './live/api'
+import { LiveApp } from './live/LiveApp'
 import { SiteLayout } from './components/Layout'
 import { DashboardShell } from './components/WorkspaceUI'
 const HomePage = lazy(() => import('./pages/HomePage').then(module => ({ default: module.HomePage })))
@@ -36,7 +38,7 @@ import './dashboard.css'
 import './supporting.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><DemoProvider><BrowserRouter><Routes><Route element={<SiteLayout/>}>
+  liveMode ? <React.StrictMode><LiveApp/></React.StrictMode> : <React.StrictMode><DemoProvider><BrowserRouter><Routes><Route element={<SiteLayout/>}>
     <Route path="/" element={<HomePage/>}/>
     <Route path="/jobs" element={<JobsPage/>}/>
     <Route path="/jobs/:id" element={<JobDetailsPage/>}/>

@@ -1,6 +1,6 @@
-# KaamDhaam frontend prototype
+# KaamDhaam marketplace
 
-KaamDhaam is an India-first freelance marketplace prototype built with React, TypeScript, Vite, Tailwind CSS, shadcn-style primitives, and Lucide icons. It extends the original landing page and job browser with marketplace discovery, client and freelancer workflows, and an operations dashboard.
+KaamDhaam is an India-first freelance marketplace built with React, TypeScript, Vite, NestJS, PostgreSQL 17, and Supabase Auth. The original browser-only demo remains available. Live mode uses the same visual system and real API data.
 
 ## Run locally
 
@@ -10,6 +10,33 @@ npm run dev
 ```
 
 Use `npm run build` for the production bundle, `npm run preview` to serve it, and `npm run test:demo` for the deterministic mock service workflow. `node scripts/browser-flow.mjs` and `node scripts/check-layout.mjs` run the browser checks when local Chrome is available.
+
+## Live mode (PowerShell)
+
+Start the backend first, following [backend setup](backend/README.md). It uses dedicated development and test PostgreSQL containers and the dedicated KaamDhaam Supabase Auth project. Do not reset populated databases or use credentials from another project.
+
+```powershell
+Copy-Item .env.example .env.local
+# Edit ignored .env.local: set VITE_APP_MODE=live, the local API URL,
+# the dedicated Supabase project URL, and its PUBLIC publishable key.
+npm ci
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`. The API defaults to `http://127.0.0.1:4000/v1` and must allow that frontend origin through `CORS_ALLOWED_ORIGINS` in ignored `backend/.env`. Supabase owns signup, password login, confirmation, reset, session restoration, and token refresh. The frontend sends access tokens to the API as bearer tokens. The backend verifies each token against the project's JWKS. Never put a service-role key, signing key, database credential, or user token in Vite variables.
+
+Set `VITE_APP_MODE=demo` and restart Vite to use the unchanged original browser demo without the backend. Live and demo state are separate; live mode never falls back to demo data. `.env.local` is ignored by Git and `.env.example` contains placeholders. The Supabase project's current Site URL still points to `localhost:3000`; successful email confirmation may end on an unreachable page. Configure **Authentication → URL Configuration** and allow the intended frontend redirect before wider use. A confirmed account can log in even when that final redirect page fails.
+
+Live mode supports public jobs and freelancer profiles; signup, login, onboarding and dual roles; client job drafts and publishing; proposals, shortlisting, rejection and idempotent hiring; contract milestones, submissions, revision requests, approvals and completion; persistent contract messages with explicit read markers; and in-app notifications. The frontend polls messages and notifications only while the page is visible. Jobs are fixed price, with INR stored as integer paise. Contract completion records work completion, not payment. No collection, escrow, releases, withdrawals, invoices, admin access, reviews, saved jobs, or pre-hire messaging are offered in live mode.
+
+```powershell
+npx tsc --noEmit
+npm run build
+npm run test:live-smoke  # local Chrome/Edge, API and frontend running in live mode
+npm run test:demo
+```
+
+The live smoke test checks the original-style homepage, public listings, protected route redirect, auth form, and mobile filters. The two-user hosted journey additionally requires two confirmed test accounts; never put their passwords or tokens in source or chat.
 
 ## Routes
 

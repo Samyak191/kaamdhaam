@@ -1,0 +1,41 @@
+import { chromium } from 'playwright-core'
+import { existsSync } from 'node:fs'
+
+const executablePath = [process.env.KAAMDHAAM_BROWSER, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].filter(Boolean).find(existsSync)
+if (!executablePath) throw new Error('Set KAAMDHAAM_BROWSER to Chrome or Edge')
+const base = process.env.KAAMDHAAM_FRONTEND_URL || 'http://127.0.0.1:5173'
+const browser = await chromium.launch({ executablePath, headless: true })
+const errors = []
+try {
+  const page = await browser.newPage()
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { name: /Find skilled talent/i }).waitFor()
+  await page.locator('.hero-visual img').waitFor()
+  console.log('PASS original-style live homepage')
+  await page.goto(`${base}/jobs`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { name: 'Browse jobs' }).waitFor()
+  console.log('PASS public jobs')
+  await page.goto(`${base}/talent`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { name: 'Find talent' }).waitFor()
+  console.log('PASS public freelancers')
+  await page.goto(`${base}/dashboard/client`, { waitUntil: 'domcontentloaded' })
+  await page.waitForURL('**/login')
+  await page.getByRole('button', { name: 'Log in' }).waitFor()
+  console.log('PASS protected route redirect')
+  await page.goto(`${base}/signup`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Create account' }).waitFor()
+  console.log('PASS Supabase signup form')
+  const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  mobile.on('pageerror', error => errors.push(error.message))
+  await mobile.goto(`${base}/jobs`, { waitUntil: 'domcontentloaded' })
+  await mobile.getByRole('button', { name: /Filters/i }).click()
+  if (!await mobile.locator('.filter-panel').isVisible()) throw new Error('Mobile job filters did not open')
+  console.log('PASS mobile job filters')
+  await mobile.goto(`${base}/talent`, { waitUntil: 'domcontentloaded' })
+  await mobile.getByRole('button', { name: /Filters/i }).click()
+  if (!await mobile.locator('.filter-panel').isVisible()) throw new Error('Mobile talent filters did not open')
+  console.log('PASS mobile talent filters')
+  await mobile.close()
+  if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`)
+} finally { await browser.close() }
