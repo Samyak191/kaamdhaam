@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
 import { api, supabase, type Me } from './api'
@@ -10,14 +10,15 @@ export function LiveAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [me, setMe] = useState<Me | null>(null)
   const [loading, setLoading] = useState(true)
-  async function refresh() { const { data } = await supabase!.auth.getSession(); if (!data.session) { setMe(null); return null }; const user = await api<Me>('/me'); setMe(user); return user }
+  const currentUserId = useRef<string | null>(null)
+  async function refresh() { const { data } = await supabase!.auth.getSession(); if (!data.session) { setMe(null); return null }; const requestedUserId = data.session.user.id; const user = await api<Me>('/me'); if (currentUserId.current !== requestedUserId) return null; setMe(user); return user }
   useEffect(() => {
     let active = true
-    void supabase!.auth.getSession().then(async ({ data }) => { if (!active) return; setSession(data.session); if (data.session) try { await refresh() } catch { if (active) setMe(null) } if (active) setLoading(false) })
-    const { data: listener } = supabase!.auth.onAuthStateChange((_event, next) => { if (!active) return; setSession(next); if (!next) setMe(null); else setTimeout(() => { if (active) void refresh().catch(() => setMe(null)) }, 0) })
+    void supabase!.auth.getSession().then(async ({ data }) => { if (!active) return; currentUserId.current = data.session?.user.id ?? null; setSession(data.session); if (data.session) try { await refresh() } catch { if (active) setMe(null) } if (active) setLoading(false) })
+    const { data: listener } = supabase!.auth.onAuthStateChange((_event, next) => { if (!active) return; if (currentUserId.current !== (next?.user.id ?? null)) setMe(null); currentUserId.current = next?.user.id ?? null; setSession(next); if (!next) setMe(null); else setTimeout(() => { if (active) void refresh().catch(() => setMe(null)) }, 0) })
     return () => { active = false; listener.subscription.unsubscribe() }
   }, [])
-  async function signOut() { await supabase!.auth.signOut(); setSession(null); setMe(null) }
+  async function signOut() { await supabase!.auth.signOut(); currentUserId.current = null; setSession(null); setMe(null) }
   return <Context.Provider value={{ session, me, loading, refresh, signOut }}>{children}</Context.Provider>
 }
 export function Protected({ children, role, allowIncomplete = false }: { children: ReactNode; role?: 'CLIENT' | 'FREELANCER'; allowIncomplete?: boolean }) {

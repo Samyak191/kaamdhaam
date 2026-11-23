@@ -1,12 +1,12 @@
-import React, { lazy } from 'react'
+import React, { lazy, Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { DemoProvider } from './data/DemoStore'
-import { liveMode } from './live/api'
-import { LiveApp } from './live/LiveApp'
 import { SiteLayout } from './components/Layout'
 import { DashboardShell } from './components/WorkspaceUI'
 const HomePage = lazy(() => import('./pages/HomePage').then(module => ({ default: module.HomePage })))
+const LiveApp = lazy(() => import('./live/LiveApp').then(module => ({ default: module.LiveApp })))
+const liveMode = import.meta.env.VITE_APP_MODE === 'live'
 const JobsPage = lazy(() => import('./pages/JobsPage').then(module => ({ default: module.JobsPage })))
 const JobDetailsPage = lazy(() => import('./pages/JobDetailsPage').then(module => ({ default: module.JobDetailsPage })))
 const EnterprisePage = lazy(() => import('./pages/SecondaryPages').then(module => ({ default: module.EnterprisePage })))
@@ -38,7 +38,7 @@ import './dashboard.css'
 import './supporting.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  liveMode ? <React.StrictMode><LiveApp/></React.StrictMode> : <React.StrictMode><DemoProvider><BrowserRouter><Routes><Route element={<SiteLayout/>}>
+  liveMode ? <React.StrictMode><Suspense fallback={<div className="container page-shell">Loading KaamDhaam…</div>}><LiveApp/></Suspense></React.StrictMode> : <React.StrictMode><DemoProvider><BrowserRouter><Routes><Route element={<SiteLayout/>}>
     <Route path="/" element={<HomePage/>}/>
     <Route path="/jobs" element={<JobsPage/>}/>
     <Route path="/jobs/:id" element={<JobDetailsPage/>}/>
