@@ -23,6 +23,8 @@ Review SQL and compatibility before release. Make an encrypted, verified backup 
 
 ## Backup and restore
 
+Sprint 4's [staging release plan](staging-release.md) and `deploy/scripts/backup.sh` / `restore-check.sh` provide encrypted streaming backup and isolated restore. Use those scripts for future staging; the older example below is a plaintext local drill only.
+
 For the initial single-host beta, schedule a daily `pg_dump -Fc` from the database container to encrypted storage outside the EC2 instance, retain daily copies for 14 days and weekly copies for 8 weeks, and run a monthly restore drill. Size, retention and frequency are starting recommendations and must fit actual RPO/RTO and cost. Keep an EC2/EBS snapshot schedule as a second layer, not a substitute for a tested logical restore. Protect backup encryption keys separately; deny public bucket access and use least-privilege IAM. Monitor backup age and failures.
 
 Example commands (substitute the actual Compose project and encrypted destination; avoid placing passwords in shell history):

@@ -1,5 +1,7 @@
 # AWS public beta preparation — no deployment performed
 
+For the current Sprint 4 single-host staging proposal, HTTPS configuration, CloudFormation template, encrypted backup tooling, and approval gate, use [the staging release plan](staging-release.md). The cost comparison below is the earlier Sprint 3 planning baseline and uses US East assumptions.
+
 ## Architecture choice
 
 Assumptions for comparison: US East (N. Virginia), Linux on demand, 730 hours/month, one small initial audience, 30 GiB gp3 disk, one public IPv4, 10 GiB backup/object storage, under 100 GB/month internet egress, single Availability Zone, no taxes, no support plan, no domain registration. These are planning ranges, **not quotes**; verify in the [AWS Pricing Calculator](https://calculator.aws/) for the chosen Region and account before ordering. Promotional credits and free tiers depend on eligibility and must not be assumed. AWS lists [public IPv4 at $0.005/hour](https://aws.amazon.com/vpc/pricing/) and [gp3 storage examples at $0.08/GB-month](https://aws.amazon.com/ebs/pricing/); compute, RDS, S3 requests, snapshots and data transfer vary by Region and use. See [EC2 pricing](https://aws.amazon.com/ec2/pricing/on-demand/), [RDS PostgreSQL pricing](https://aws.amazon.com/rds/postgresql/pricing/) and [S3 pricing](https://aws.amazon.com/s3/pricing/).
