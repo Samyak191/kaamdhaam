@@ -2,6 +2,8 @@
 
 NestJS 11 REST API under `/v1`. Local PostgreSQL 17 owns application identities, organizations, jobs, proposals, contracts and audit records. Supabase Auth owns passwords and sessions. The React frontend supports the original demo and an original-style live mode.
 
+Sprint 3 adds Helmet security headers, 32 KiB JSON / 8 KiB form body limits, explicit CORS methods and headers, per-route in-memory rate limiting, generated request IDs, structured access logs and a global exception filter that returns a generic HTTP 500 (with the request ID) for unexpected errors while logging the cause server-side. `RATE_LIMIT_PER_MINUTE` (default 600 for GET/HEAD), `RATE_LIMIT_WRITE_PER_MINUTE` (default 30 for mutations), and `TRUST_PROXY_HOPS` (default 0) are validated environment settings. Set proxy trust to 1 only when every request comes through the trusted reverse proxy. These limits are per backend process; multiple replicas need shared enforcement. See [security review](../docs/security.md) and [operations runbook](../docs/operations.md).
+
 ## Local setup (PowerShell)
 
 Use Node.js 22.12+ and Docker Desktop. From `backend`:

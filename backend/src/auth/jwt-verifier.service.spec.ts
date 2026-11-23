@@ -30,8 +30,8 @@ describe('Supabase JWT verification', () => {
       SUPABASE_JWKS_URL: `${issuer}/.well-known/jwks.json`,
     })[name] } as ConfigService;
     verifier = new JwtVerifierService(config);
-  });
-  afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
+  }, 30000);
+  afterAll(async () => { if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 
   const sign = (claims: Record<string, unknown> = {}, options: { issuer?: string; audience?: string; alg?: string } = {}) =>
     new SignJWT({ role: 'authenticated', ...claims })

@@ -10,6 +10,9 @@ export interface AppConfiguration {
   host: string;
   port: number;
   corsOrigins: string[];
+  rateLimitPerMinute: number;
+  rateLimitWritePerMinute: number;
+  trustProxyHops: number;
 }
 
 export function getAppConfiguration(config: ConfigService): AppConfiguration {
@@ -18,5 +21,8 @@ export function getAppConfiguration(config: ConfigService): AppConfiguration {
     host: config.getOrThrow<string>('HOST'),
     port: config.getOrThrow<number>('PORT'),
     corsOrigins: config.getOrThrow<string[]>('CORS_ORIGINS'),
+    rateLimitPerMinute: config.getOrThrow<number>('RATE_LIMIT_PER_MINUTE'),
+    rateLimitWritePerMinute: config.getOrThrow<number>('RATE_LIMIT_WRITE_PER_MINUTE'),
+    trustProxyHops: config.getOrThrow<number>('TRUST_PROXY_HOPS'),
   };
 }

@@ -29,6 +29,20 @@ function parsePort(value: unknown): number {
   return port;
 }
 
+function positiveLimit(value: unknown, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value) || Number(value) > 100000) {
+    throw new Error(`${name} must be an integer between 1 and 100000.`);
+  }
+  return Number(value);
+}
+
+function proxyHops(value: unknown): number {
+  if (value === undefined || value === '0') return 0;
+  if (value === '1') return 1;
+  throw new Error('TRUST_PROXY_HOPS must be 0 or 1.');
+}
+
 function parseCorsOrigins(value: unknown, environment: NodeEnvironment): string[] {
   if (value === undefined && environment === 'production') {
     throw new Error('CORS_ORIGINS must be set explicitly in production.');
@@ -56,6 +70,9 @@ function parseCorsOrigins(value: unknown, environment: NodeEnvironment): string[
       parsed.origin !== origin
     ) {
       throw new Error('CORS_ORIGINS must contain only canonical HTTP or HTTPS origins, without paths or credentials.');
+    }
+    if (environment === 'production' && parsed.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
+      throw new Error('Production CORS_ORIGINS must use HTTPS outside loopback.');
     }
   }
   return [...new Set(origins)];
@@ -90,5 +107,8 @@ export function validateEnvironment(input: Record<string, unknown>): Record<stri
     HOST: parseHost(input.HOST),
     PORT: parsePort(input.PORT),
     CORS_ORIGINS: parseCorsOrigins(input.CORS_ORIGINS, environment),
+    RATE_LIMIT_PER_MINUTE: positiveLimit(input.RATE_LIMIT_PER_MINUTE, 600, 'RATE_LIMIT_PER_MINUTE'),
+    RATE_LIMIT_WRITE_PER_MINUTE: positiveLimit(input.RATE_LIMIT_WRITE_PER_MINUTE, 30, 'RATE_LIMIT_WRITE_PER_MINUTE'),
+    TRUST_PROXY_HOPS: proxyHops(input.TRUST_PROXY_HOPS),
   };
 }

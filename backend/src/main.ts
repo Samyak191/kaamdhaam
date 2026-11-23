@@ -5,9 +5,10 @@ import { AppModule } from './app.module';
 import { configureApp } from './config/configure-app';
 import { API_PREFIX, SERVICE_NAME } from './config/configuration';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = configureApp(app);
   if (config.nodeEnv !== 'production') {
     const document = SwaggerModule.createDocument(app, new DocumentBuilder()
@@ -16,6 +17,9 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('v1/docs', app, document, { jsonDocumentUrl: 'v1/openapi.json' });
   }
   await app.listen(config.port, config.host);
+  const server = app.getHttpServer();
+  server.requestTimeout = 30000;
+  server.headersTimeout = 15000;
   Logger.log(
     JSON.stringify({
       event: 'api_started',

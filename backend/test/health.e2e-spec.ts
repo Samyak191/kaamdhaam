@@ -1,4 +1,4 @@
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -6,12 +6,12 @@ import { configureApp } from '../src/config/configure-app';
 import { PrismaService } from '../src/database/prisma.service';
 
 describe('Health API (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService).useValue({ isReady: async () => false }).compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestExpressApplication>();
     configureApp(app);
     await app.init();
   });
@@ -21,10 +21,20 @@ describe('Health API (e2e)', () => {
   });
 
   it('returns HTTP 200 and the exact health JSON at /v1/health', async () => {
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .get('/v1/health')
       .expect(200)
       .expect({ status: 'ok', service: 'kaamdham-api' });
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(response.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+    expect(response.headers['cache-control']).toBe('no-store');
+  });
+
+  it('rejects oversized JSON before processing a protected mutation', async () => {
+    await request(app.getHttpServer()).post('/v1/jobs')
+      .set('Content-Type', 'application/json')
+      .send({ description: 'x'.repeat(40000) }).expect(413);
   });
 
   it('returns HTTP 404 for an unknown endpoint', async () => {

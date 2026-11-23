@@ -14,6 +14,9 @@ describe('environment validation', () => {
       HOST: '127.0.0.1',
       PORT: 4000,
       CORS_ORIGINS: ['http://localhost:5173'],
+      RATE_LIMIT_PER_MINUTE: 600,
+      RATE_LIMIT_WRITE_PER_MINUTE: 30,
+      TRUST_PROXY_HOPS: 0,
     });
   });
 
@@ -38,10 +41,18 @@ describe('environment validation', () => {
 
   it('requires an explicit CORS allowlist in production', () => {
     expect(() => valid({ NODE_ENV: 'production' })).toThrow('CORS_ORIGINS');
+    expect(() => valid({ NODE_ENV: 'production', CORS_ORIGINS: 'http://example.com' })).toThrow('HTTPS');
   });
 
   it('rejects invalid environment and host values', () => {
     expect(() => valid({ NODE_ENV: 'preview' })).toThrow('NODE_ENV');
     expect(() => valid({ HOST: 'example.com' })).toThrow('HOST');
+  });
+
+  it('validates rate limits and explicit proxy trust', () => {
+    expect(() => valid({ RATE_LIMIT_PER_MINUTE: '0' })).toThrow('RATE_LIMIT_PER_MINUTE');
+    expect(() => valid({ RATE_LIMIT_WRITE_PER_MINUTE: 'abc' })).toThrow('RATE_LIMIT_WRITE_PER_MINUTE');
+    expect(() => valid({ TRUST_PROXY_HOPS: '2' })).toThrow('TRUST_PROXY_HOPS');
+    expect(valid({ TRUST_PROXY_HOPS: '1', RATE_LIMIT_WRITE_PER_MINUTE: '12' })).toMatchObject({ TRUST_PROXY_HOPS: 1, RATE_LIMIT_WRITE_PER_MINUTE: 12 });
   });
 });

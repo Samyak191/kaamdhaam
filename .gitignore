@@ -6,3 +6,4 @@ tmp
 .env
 .env.local
 .env.*.local
+deploy/backend.env
