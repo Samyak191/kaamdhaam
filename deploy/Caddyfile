@@ -1,0 +1,12 @@
+{$STAGING_HOST} {
+  encode zstd gzip
+
+  @api path /v1 /v1/*
+  handle @api {
+    reverse_proxy backend:4000
+  }
+
+  handle {
+    reverse_proxy web:8080
+  }
+}
