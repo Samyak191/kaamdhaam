@@ -1,5 +1,7 @@
 # KaamDhaam marketplace
 
+Sprint 3 preparation: [security review](docs/security.md), [performance review](docs/performance.md), [operations runbook](docs/operations.md), and [AWS deployment plan](docs/aws-deployment.md). The deployment files are preparation only; no cloud resources have been created.
+
 KaamDhaam is an India-first freelance marketplace built with React, TypeScript, Vite, NestJS, PostgreSQL 17, and Supabase Auth. The original browser-only demo remains available. Live mode uses the same visual system and real API data.
 
 ## Run locally
