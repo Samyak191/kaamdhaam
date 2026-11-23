@@ -16,3 +16,5 @@ printf '%s  %s\n' "$COMPOSE_PLUGIN_SHA256" "$tmp" | sha256sum -c -
 install -m 0755 "$tmp" /usr/local/lib/docker/cli-plugins/docker-compose
 docker compose version
 docker version
+command -v aws >/dev/null || { echo 'AWS CLI is required for instance-role backup upload' >&2; exit 2; }
+aws --version

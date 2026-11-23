@@ -30,7 +30,7 @@ trap - EXIT
 printf '%s  %s\n' "$(sha256sum "$destination" | cut -d' ' -f1)" "$(basename "$destination")" > "${destination}.sha256"
 
 if [[ -n "${BACKUP_S3_URI:-}" ]]; then
-  role_aws=(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE -u AWS_SHARED_CREDENTIALS_FILE -u AWS_CONFIG_FILE aws)
+  role_aws=(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_SHARED_CREDENTIALS_FILE -u AWS_CONFIG_FILE -u AWS_ROLE_ARN -u AWS_WEB_IDENTITY_TOKEN_FILE aws)
   "${role_aws[@]}" s3 cp --only-show-errors --sse AES256 "$destination" "$BACKUP_S3_URI/$(basename "$destination")"
   "${role_aws[@]}" s3 cp --only-show-errors --sse AES256 "${destination}.sha256" "$BACKUP_S3_URI/$(basename "$destination").sha256"
 fi
