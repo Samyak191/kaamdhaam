@@ -48,21 +48,46 @@ else
   # Python reads from the terminal, creates a random DB password, and atomically
   # installs root-owned files readable by the runner group. It prints no values.
   KAAMDHAAM_RUNNER_GROUP="$runner_group" python3 - "$compose_env" "$backend_env" <<'PY'
-import getpass
 import grp
 import os
 import secrets
 import sys
 import tempfile
+import termios
 from pathlib import Path
 from urllib.parse import quote
 
+
+def read_tty_line(prompt, hidden=False):
+    # stdin contains this heredoc, and SSM's terminal cannot be opened in r+ mode.
+    fd = os.open('/dev/tty', os.O_RDWR | os.O_NOCTTY)
+    previous = None
+    try:
+        if hidden:
+            previous = termios.tcgetattr(fd)
+            no_echo = previous.copy()
+            no_echo[3] &= ~termios.ECHO
+            termios.tcsetattr(fd, termios.TCSANOW, no_echo)
+        os.write(fd, prompt.encode('utf-8'))
+        value = bytearray()
+        while len(value) < 4096:
+            character = os.read(fd, 1)
+            if not character:
+                raise ValueError('Terminal input ended unexpectedly')
+            if character in (b'\n', b'\r'):
+                return value.decode('utf-8')
+            value.extend(character)
+        raise ValueError('Terminal input is too long')
+    finally:
+        if previous is not None:
+            termios.tcsetattr(fd, termios.TCSANOW, previous)
+            os.write(fd, b'\n')
+        os.close(fd)
+
+
 compose_path, backend_path = map(Path, sys.argv[1:])
-with open('/dev/tty', 'r+') as tty:
-    tty.write('Dedicated KaamDhaam Supabase URL: ')
-    tty.flush()
-    url = tty.readline().strip()
-    key = getpass.getpass('Supabase publishable key (hidden): ', stream=tty)
+url = read_tty_line('Dedicated KaamDhaam Supabase URL: ').strip()
+key = read_tty_line('Supabase publishable key (hidden): ', hidden=True)
 if url.rstrip('/') != 'https://tvynmgcbyathsgguezye.supabase.co' or not key.startswith('sb_publishable_'):
     raise SystemExit('Dedicated Supabase public configuration is invalid')
 url = url.rstrip('/')
@@ -119,7 +144,8 @@ export EXPECTED_SUPABASE_PUBLISHABLE_KEY
 python3 "$root/deploy/scripts/validate-env.py"
 unset EXPECTED_SUPABASE_PUBLISHABLE_KEY
 
-export RELEASE_GIT_SHA="$(git -C "$root" rev-parse HEAD)"
+RELEASE_GIT_SHA="$(git -C "$root" rev-parse HEAD)"
+export RELEASE_GIT_SHA
 docker compose --env-file "$compose_env" -f "$root/deploy/compose.yaml" \
   -f "$root/deploy/staging.compose.yaml" -f "$root/deploy/ghcr.compose.yaml" \
   -p kaamdham-beta config --quiet
