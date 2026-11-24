@@ -71,7 +71,9 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
+          # The database volume identity must never depend on a mutable variable.
+          COMPOSE_PROJECT_NAME: kaamdham-beta
+          CONFIGURED_COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
           STAGING_HOST: ${{ vars.STAGING_HOST }}
           EXPECTED_PUBLIC_IPV4: ${{ vars.EXPECTED_PUBLIC_IPV4 }}
           EXPECTED_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
@@ -87,6 +89,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$RUNNER_NAME" = 'kaamdhaam-ec2-runner'
+          if [[ "$CONFIGURED_COMPOSE_PROJECT_NAME" != "$COMPOSE_PROJECT_NAME" ]]; then
+            configured_bytes="$(printf '%s' "$CONFIGURED_COMPOSE_PROJECT_NAME" | wc -c)"
+            if [[ -z "$CONFIGURED_COMPOSE_PROJECT_NAME" ]]; then issue=missing
+            elif [[ "$CONFIGURED_COMPOSE_PROJECT_NAME" =~ [[:space:]] ]]; then issue=whitespace
+            elif [[ "$configured_bytes" -ne "${#CONFIGURED_COMPOSE_PROJECT_NAME}" ]]; then issue=non_ascii
+            else issue=other
+            fi
+            echo "Repository Compose project variable differs from the approved pinned identity (bytes=${configured_bytes}, issue=${issue}); using the pinned identity"
+          fi
           DOCKER_CONFIG="$(mktemp -d)"
           export DOCKER_CONFIG
           trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT

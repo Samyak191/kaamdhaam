@@ -3,13 +3,24 @@ set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 config="$root/deploy"
-: "${COMPOSE_PROJECT_NAME:?Set the existing approved Compose project name}"
 : "${DEPLOY_ENV_FILE:?Set absolute server compose env path}"
 : "${BACKEND_ENV_FILE:?Set absolute server backend env path}"
 : "${MIGRATIONS_REVIEWED_SHA:?Set the reviewed release SHA}"
 : "${INITIAL_EMPTY_DB:?Explicitly state true or false}"
 : "${RELEASE_STATE_DIR:?Set persistent release state directory}"
-[[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo 'Invalid Compose project name' >&2; exit 2; }
+if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  echo 'Compose project identity missing (bytes=0); expected approved kaamdham-beta' >&2
+  exit 2
+fi
+if [[ "$COMPOSE_PROJECT_NAME" != kaamdham-beta ]]; then
+  received_bytes="$(printf '%s' "$COMPOSE_PROJECT_NAME" | wc -c)"
+  if [[ "$COMPOSE_PROJECT_NAME" =~ [[:space:]] ]]; then character_class=whitespace
+  elif [[ "$received_bytes" -ne "${#COMPOSE_PROJECT_NAME}" ]]; then character_class=non_ascii
+  else character_class=other
+  fi
+  printf 'Compose project identity mismatch (bytes=%s, character_class=%s); expected approved kaamdham-beta\n' "$received_bytes" "$character_class" >&2
+  exit 2
+fi
 [[ "$INITIAL_EMPTY_DB" == true || "$INITIAL_EMPTY_DB" == false ]] || { echo 'INITIAL_EMPTY_DB must be true or false' >&2; exit 2; }
 [[ -z "$(git -C "$root" status --porcelain)" ]] || { echo 'Release checkout must be clean' >&2; exit 2; }
 RELEASE_GIT_SHA="$(git -C "$root" rev-parse HEAD)"

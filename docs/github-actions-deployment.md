@@ -53,7 +53,7 @@ Create repository **Actions variables** (public configuration, never passwords):
 | --- | --- |
 | `VITE_SUPABASE_URL` | `https://tvynmgcbyathsgguezye.supabase.co` (dedicated KaamDhaam project only) |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | This same project's publishable key; it is intentionally public in the web bundle |
-| `COMPOSE_PROJECT_NAME` | The chosen existing Docker Compose project name, for example `kaamdham-beta`; **verify before first run** because this determines the PostgreSQL volume name |
+| `COMPOSE_PROJECT_NAME` | Optional diagnostic variable. The deployment workflow pins the approved name `kaamdham-beta`; this variable cannot change the PostgreSQL volume identity. If present, set it to exactly `kaamdham-beta`. |
 | `STAGING_HOST` | Approved DNS hostname pointing to this EC2; no URL scheme or path |
 | `EXPECTED_PUBLIC_IPV4` | This EC2's approved public IPv4; preflight compares DNS |
 | `AGE_RECIPIENT` | Public age recipient whose private identity is held off-host |
@@ -68,7 +68,7 @@ On the EC2 host, prepare the following **before clicking Run workflow**:
 3. `/opt/kaamdhaam/state`, owned and writable by the runner service account. The release records `current` and `previous` verified commit SHAs here only after health checks pass. Keep this directory across checkouts.
 4. DNS A record points to the approved EC2 public IP; 80/443 can reach Caddy, while 22, 4000, 5432 and 8080 are not publicly open. Verify Caddy configuration, TLS hostname ownership, Supabase Site URL and exact redirect allowlist for `/login`, `/onboarding`, `/reset-password`, and the instance-role-only S3 backup prefix. The first trusted certificate is issued when Caddy starts; the post-start smoke check must verify HTTPS before the release is accepted.
 5. Confirm at least 6 GiB free in Docker's filesystem and at least 512 MiB available RAM on the 2 GiB host. The workflow **pulls** app images; it does not build them there. The age helper is a small local backup image. Monitor memory and disk after release; `t3.small` headroom remains an operational risk.
-6. Review pending Prisma SQL migrations. Confirm the database volume's current state, backup recipient/key custody, S3 restore access, and exact Compose project name. The volume is `${COMPOSE_PROJECT_NAME}_postgres_data`. Never run `down -v`, `migrate reset`, or `db push`.
+6. Review pending Prisma SQL migrations. Confirm the database volume's current state, backup recipient/key custody, and S3 restore access. The fixed approved project name is `kaamdham-beta`, so the volume is `kaamdham-beta_postgres_data`. Never run `down -v`, `migrate reset`, or `db push`.
 
 The `preflight-ec2.sh` script checks env consistency without printing values, file permissions, DNS, resource headroom, Caddy config, and IAM-role S3 access **before any Compose operation**. `ghcr.compose.yaml` removes all app build contexts from Compose. An existing database volume always gets an encrypted S3 backup before `prisma migrate deploy`. If no volume exists, the manual `initial_empty_db=true` input explicitly authorizes creating a new empty database. A mismatch stops the release. Compose then waits for database health, the one-shot migration's successful completion, and backend/web health. HTTPS smoke and running revision labels must pass before recording the release as verified.
 
