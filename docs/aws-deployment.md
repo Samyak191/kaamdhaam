@@ -1,6 +1,6 @@
 # AWS public beta preparation — no deployment performed
 
-For the current Sprint 4 single-host staging proposal, HTTPS configuration, CloudFormation template, encrypted backup tooling, and approval gate, use [the staging release plan](staging-release.md). The cost comparison below is the earlier Sprint 3 planning baseline and uses US East assumptions.
+For the current **existing Sydney EC2** CI/CD plan, use [GitHub Actions deployment](github-actions-deployment.md). The [staging release plan](staging-release.md) is an earlier unexecuted Mumbai provisioning proposal. The cost comparison below uses older US East assumptions.
 
 ## Architecture choice
 

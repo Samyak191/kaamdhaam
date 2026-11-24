@@ -20,7 +20,11 @@ compose=(docker compose --env-file "$config/.env" -f "$config/compose.yaml" -p "
 
 # Validate the encrypted archive before creating a database. No plaintext dump is written to disk.
 decrypt | "${compose[@]}" exec -T db pg_restore -l >/dev/null
+# These variables deliberately expand inside the database container.
+# shellcheck disable=SC2016
 "${compose[@]}" exec -T db sh -ec 'test "$1" != "$POSTGRES_DB"; ! psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$1'\''" | grep -q 1; createdb -U "$POSTGRES_USER" "$1"' sh "$RESTORE_DB"
+# shellcheck disable=SC2016
 decrypt | "${compose[@]}" exec -T db sh -ec 'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" -d "$1"' sh "$RESTORE_DB"
+# shellcheck disable=SC2016
 "${compose[@]}" exec -T db sh -ec 'psql -U "$POSTGRES_USER" -d "$1" -Atqc "SELECT count(*) FROM information_schema.tables WHERE table_schema = '\''public'\'' AND table_type = '\''BASE TABLE'\''"' sh "$RESTORE_DB" | sed 's/^/Restored public tables: /'
 echo "Restore check complete in new database: $RESTORE_DB"

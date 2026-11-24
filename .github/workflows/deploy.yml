@@ -1,0 +1,94 @@
+name: Deploy staging
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_to_ec2:
+        description: 'Approve deployment of the published main commit to Sydney EC2'
+        type: boolean
+        required: true
+        default: false
+      reviewed_sha:
+        description: 'Full 40-character main commit SHA whose migrations were reviewed'
+        type: string
+        required: true
+      initial_empty_db:
+        description: 'Confirm the first release has no existing PostgreSQL volume'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify_images:
+    if: github.ref == 'refs/heads/main' && inputs.deploy_to_ec2 == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Require reviewed main SHA
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          test "$REVIEWED_SHA" = "$RELEASE_SHA"
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify CI-published images exist
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          for service in migrate backend web; do
+            docker buildx imagetools inspect "ghcr.io/samyak191/kaamdhaam-${service}:${RELEASE_SHA}" > /dev/null
+          done
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && inputs.deploy_to_ec2 == true
+    needs: [verify_images]
+    runs-on: [self-hosted, Linux, X64, kaamdhaam-deploy]
+    environment: staging
+    concurrency:
+      group: kaamdhaam-ec2-deploy
+      cancel-in-progress: false
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Pull and deploy the reviewed commit
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          EXPECTED_PUBLIC_IPV4: ${{ vars.EXPECTED_PUBLIC_IPV4 }}
+          EXPECTED_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          EXPECTED_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          AGE_RECIPIENT: ${{ vars.AGE_RECIPIENT }}
+          BACKUP_S3_URI: ${{ vars.BACKUP_S3_URI }}
+          AWS_DEFAULT_REGION: ap-southeast-2
+          DEPLOY_ENV_FILE: /etc/kaamdhaam/compose.env
+          BACKEND_ENV_FILE: /etc/kaamdhaam/backend.env
+          RELEASE_STATE_DIR: /opt/kaamdhaam/state
+          MIGRATIONS_REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          INITIAL_EMPTY_DB: ${{ inputs.initial_empty_db }}
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_NAME" = 'kaamdhaam-ec2-runner'
+          DOCKER_CONFIG="$(mktemp -d)"
+          export DOCKER_CONFIG
+          trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null
+          bash deploy/scripts/release-ghcr.sh

@@ -8,6 +8,10 @@ tmp
 deploy/backend.env
 deploy/.env
 deploy/*.dump
+deploy/backups
+**/*.dump
+**/*.dump.age
+**/*.identity
 docs
 .github
 scripts

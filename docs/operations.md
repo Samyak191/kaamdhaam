@@ -1,5 +1,7 @@
 # Operations and recovery runbook
 
+The current Sydney EC2 release path is [GitHub Actions deployment](github-actions-deployment.md). The local procedures below remain useful for development and diagnosis.
+
 ## Local start and diagnosis
 
 Use ignored `backend/.env` and `.env.local` files, then start the existing development PostgreSQL containers with the commands in [backend setup](../backend/README.md). Start API with `cd backend; npm run start:dev`; start frontend from repository root with `npm run dev`. Stop with Ctrl+C; Nest shutdown hooks disconnect Prisma on SIGINT/SIGTERM. Do not delete Docker volumes or reset populated databases.

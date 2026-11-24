@@ -8,3 +8,4 @@ tmp
 .env.*.local
 deploy/backend.env
 deploy/backups/
+__pycache__/

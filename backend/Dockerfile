@@ -9,11 +9,15 @@ COPY src ./src
 RUN DATABASE_URL=postgresql://placeholder@127.0.0.1:5432/placeholder npm run db:generate && npm run build
 
 FROM build AS migrate
+ARG RELEASE_GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$RELEASE_GIT_SHA
+LABEL org.opencontainers.image.source="https://github.com/Samyak191/kaamdhaam"
 CMD ["npm", "run", "db:deploy"]
 
 FROM node:22.14.0-bookworm-slim AS runtime
 ARG RELEASE_GIT_SHA=unknown
 LABEL org.opencontainers.image.revision=$RELEASE_GIT_SHA
+LABEL org.opencontainers.image.source="https://github.com/Samyak191/kaamdhaam"
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=4000
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*

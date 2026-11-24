@@ -20,7 +20,7 @@ services:
     build:
       context: ../backend
       target: migrate
-    env_file: ./backend.env
+    env_file: ${BACKEND_ENV_FILE:-./backend.env}
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +33,7 @@ services:
       target: runtime
       args:
         RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
-    env_file: ./backend.env
+    env_file: ${BACKEND_ENV_FILE:-./backend.env}
     restart: unless-stopped
     depends_on:
       migrate:

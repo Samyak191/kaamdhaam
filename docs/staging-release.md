@@ -1,5 +1,7 @@
 # Sprint 4 staging release plan (local preparation; no AWS deployment)
 
+The current plan for the user's existing Sydney EC2 and GitHub Actions runner is [GitHub Actions deployment](github-actions-deployment.md). The Mumbai/t3.medium material below is the earlier unexecuted provisioning proposal.
+
 ## Proposed topology and approval boundary
 
 ```mermaid
@@ -44,7 +46,7 @@ Staging Supabase Site URL: `https://<approved-staging-host>/`. Allow exact redir
 
 1. Select AWS account and existing public VPC/subnet; verify matching Region, IAM Identity Center/temporary credentials, credits, regional quote, domain control, DNS TTL, alert email/cap, and backup public key. Never use AWS root keys. Review CloudFormation change set with `CAPABILITY_IAM` and stack policy; create the stack only after explicit approval.
 2. Connect through SSM. Run `deploy/scripts/bootstrap-al2023.sh` with a pinned, SHA-256 verified official Compose plugin binary. Keep the repo and ignored env files under restricted ownership/mode. Confirm Docker, Compose, AWS CLI, clock and available disk. Adapt `deploy/docker-daemon.json.example` to the host's existing Docker configuration for local JSON log rotation before public traffic. Do not place long-lived AWS keys on the instance.
-3. Confirm DNS and Caddy automatic HTTPS, Supabase allowlist, exact CORS origin and backup S3 prefix. Review all pending migration SQL and set `MIGRATIONS_REVIEWED_SHA` to the exact release commit. `release.sh` requires a clean checkout and that matching review SHA; it builds revision-labelled images, writes an encrypted backup to S3, runs the one-shot Prisma production migration through Compose, starts services, performs HTTPS smoke checks, and verifies image revision labels. **Do not run it before all prerequisites are met.** Check backup upload and retrieval separately; a local backup alone is insufficient.
+3. The current `release.sh` delegates to `release-ghcr.sh`; it pulls SHA-tagged images built by GitHub-hosted CI and does not build the application on EC2. See [GitHub Actions deployment](github-actions-deployment.md) for the current reviewed-SHA, backup, migration, and HTTPS gates.
 4. After rollout, run the acceptance checklist below. Inspect `status.sh`, Docker restart counts, disk, CPU and CloudWatch. Record Git SHA, migration IDs, backup object, and certificate expiry.
 
 Rollback: stop traffic or pause release, preserve logs and current volumes, check SQL compatibility, then redeploy a known-good Git revision and rebuild images. The script does not automatically reverse schema migrations. If data recovery is needed, restore an encrypted object to a **new** database/host and compare before any cutover. Never run `docker compose down -v`. A failed migration requires reviewing `_prisma_migrations` and the actual schema before retrying.

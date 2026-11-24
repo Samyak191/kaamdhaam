@@ -1,0 +1,11 @@
+# Use only with compose.yaml and staging.compose.yaml. !reset removes host build contexts.
+services:
+  migrate:
+    image: ghcr.io/samyak191/kaamdhaam-migrate:${RELEASE_GIT_SHA:?Set full release commit SHA}
+    build: !reset null
+  backend:
+    image: ghcr.io/samyak191/kaamdhaam-backend:${RELEASE_GIT_SHA:?Set full release commit SHA}
+    build: !reset null
+  web:
+    image: ghcr.io/samyak191/kaamdhaam-web:${RELEASE_GIT_SHA:?Set full release commit SHA}
+    build: !reset null
