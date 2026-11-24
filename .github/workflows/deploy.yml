@@ -75,7 +75,9 @@ jobs:
           COMPOSE_PROJECT_NAME: kaamdham-beta
           CONFIGURED_COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
           STAGING_HOST: ${{ vars.STAGING_HOST }}
-          EXPECTED_PUBLIC_IPV4: ${{ vars.EXPECTED_PUBLIC_IPV4 }}
+          # The Elastic IP is fixed infrastructure; the repository variable is diagnostic only.
+          EXPECTED_PUBLIC_IPV4: 3.104.58.162
+          CONFIGURED_PUBLIC_IPV4: ${{ vars.EXPECTED_PUBLIC_IPV4 }}
           EXPECTED_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           EXPECTED_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           AGE_RECIPIENT: ${{ vars.AGE_RECIPIENT }}
@@ -97,6 +99,15 @@ jobs:
             else issue=other
             fi
             echo "Repository Compose project variable differs from the approved pinned identity (bytes=${configured_bytes}, issue=${issue}); using the pinned identity"
+          fi
+          if [[ "$CONFIGURED_PUBLIC_IPV4" != "$EXPECTED_PUBLIC_IPV4" ]]; then
+            configured_bytes="$(printf '%s' "$CONFIGURED_PUBLIC_IPV4" | wc -c)"
+            if [[ -z "$CONFIGURED_PUBLIC_IPV4" ]]; then issue=missing
+            elif [[ "$CONFIGURED_PUBLIC_IPV4" =~ [[:space:]] ]]; then issue=whitespace
+            elif [[ "$configured_bytes" -ne "${#CONFIGURED_PUBLIC_IPV4}" ]]; then issue=non_ascii
+            else issue=other
+            fi
+            echo "Repository EXPECTED_PUBLIC_IPV4 variable differs from the pinned Elastic IP (bytes=${configured_bytes}, issue=${issue}); using the pinned address"
           fi
           DOCKER_CONFIG="$(mktemp -d)"
           export DOCKER_CONFIG

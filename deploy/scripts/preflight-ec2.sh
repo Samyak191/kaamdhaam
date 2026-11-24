@@ -23,8 +23,8 @@ done
 [[ "${AWS_DEFAULT_REGION:-}" == ap-southeast-2 ]] || { echo 'Expected AWS region ap-southeast-2' >&2; exit 2; }
 python3 "$root/deploy/scripts/validate-env.py"
 
-dns_addresses="$(getent ahostsv4 "$STAGING_HOST" | awk '{print $1}' | sort -u)"
-grep -Fxq "$EXPECTED_PUBLIC_IPV4" <<< "$dns_addresses" || { echo 'Staging DNS does not resolve to the approved EC2 IPv4 address' >&2; exit 2; }
+# Retries transient resolver failures; the approved-address requirement itself is unchanged.
+bash "$root/deploy/scripts/dns-check.sh" "$STAGING_HOST" "$EXPECTED_PUBLIC_IPV4"
 [[ -r "$root/deploy/Caddyfile" ]] || { echo 'Caddyfile missing' >&2; exit 2; }
 if ! command -v docker >/dev/null || ! docker info --format '{{.ServerVersion}}' >/dev/null; then
   echo 'Docker is unavailable to the runner' >&2
