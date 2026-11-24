@@ -27,6 +27,26 @@ Only `.github/workflows/deploy.yml` has a self-hosted job. It is triggered by `w
 
 ## Configuration before the first manual deployment
 
+### Fast track for the existing Sydney host
+
+Use `deploy/scripts/bootstrap-existing-ec2.sh` in an approved Session Manager terminal after this commit is pushed. It is for the already provisioned Amazon Linux 2023 server; `bootstrap-al2023.sh` is the earlier OS/Docker installation script and is unnecessary here. From a trusted checkout of the intended release, run:
+
+```bash
+systemctl list-units --all 'actions.runner*' --no-pager
+systemctl show -p User --value <actual-runner-unit-name>
+sudo bash deploy/scripts/bootstrap-existing-ec2.sh <actual-runner-service-user>
+```
+
+Use the unit name and service account reported on the host. If `User` is empty, inspect the unit and pass its actual service account explicitly; do not guess. The script checks Docker access as that user, Python, AWS CLI, disk (at least 6 GiB free), total/available RAM (at least 1.8 GiB/512 MiB), and the existing database volume. It prompts privately for the dedicated Supabase URL and publishable key, generates a random PostgreSQL password **only when both server env files and the project database volume are absent**, and creates root-owned, runner-group-readable env files. Existing files and volumes are left in place. It validates their contents and merged Compose configuration without pulling images or starting containers. The password is not printed or stored in Git. Back up these env files through an approved encrypted process before treating host loss as recoverable. If the volume already exists but env files do not, recover its original credentials rather than generating new ones.
+
+The script's Git checkout must be the same reviewed commit that will be dispatched, because `ghcr.compose.yaml` uses its full SHA. It checks that the runner account can inspect all three published GHCR manifests. `verify_images` repeats that check on a hosted runner, and the deploy job uses its short-lived `GITHUB_TOKEN` for an authenticated pull. No personal access token belongs on EC2. The published app images are prebuilt; the only on-host build on later releases is the small `age` backup helper when an existing database requires backup. A 2 GiB host passes only a minimum headroom check, not a capacity guarantee; measure memory and restart counts after the first release.
+
+Before the first dispatch, set `AGE_RECIPIENT` to a public age recipient and `BACKUP_S3_URI` to the real approved `s3://<bucket>/backups` prefix as GitHub Actions variables. Keep the age private identity off EC2. The instance profile must allow `s3:ListBucket` for `backups/*` and `s3:PutObject` plus `s3:GetObject` for `backups/*`; the upload uses SSE-S3 (`AES256`). A successful `ListBucket` preflight does **not** prove upload works. After approval, test an encrypted backup object upload, checksum retrieval, and restore to an isolated database before treating off-host backup as verified. Do not name a bucket until its actual destination and access are confirmed.
+
+While `.IN` KYC or DNS is pending, bootstrap and Compose config checks may run over Session Manager; container startup and the manual deploy stay blocked. `preflight-ec2.sh` requires `staging.kaam-dhaam.in` to resolve to `3.104.58.162` before Compose starts, and `smoke.sh` requires trusted HTTPS. A local or private-network HTTP check can diagnose a running service later, but cannot satisfy public staging acceptance. Confirm Supabase Site URL and redirect allowlist use the final HTTPS host.
+
+The checked-in workflows send all pull-request jobs to GitHub-hosted runners, and only the manual `main` deployment uses the `kaamdhaam-deploy` runner. Verify its runner group/workflow access in GitHub settings: untrusted contributors must not be able to run altered PR workflows on it. Docker group access on this runner is effectively host administrator access.
+
 Create repository **Actions variables** (public configuration, never passwords):
 
 | Variable | Required value |
