@@ -14,6 +14,10 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "$DEPLOY_ENV_FILE" == /* && "$BACKEND_ENV_FILE" == /* ]] || { echo 'Server environment paths must be absolute' >&2; exit 2; }
 [[ -f "$DEPLOY_ENV_FILE" && -f "$BACKEND_ENV_FILE" ]] || { echo 'Server environment files missing' >&2; exit 2; }
 [[ -d "$RELEASE_STATE_DIR" && -w "$RELEASE_STATE_DIR" ]] || { echo 'Release state directory missing or not writable' >&2; exit 2; }
+# Pre-migration backups are written to a persistent runner-owned directory outside the checkout.
+: "${BACKUP_OUTPUT_DIR:?Set the persistent backup output directory}"
+[[ "$BACKUP_OUTPUT_DIR" == /* ]] || { echo 'Backup output directory must be absolute' >&2; exit 2; }
+[[ -d "$BACKUP_OUTPUT_DIR" && -w "$BACKUP_OUTPUT_DIR" ]] || { echo 'Backup output directory missing or not writable' >&2; exit 2; }
 for file in "$DEPLOY_ENV_FILE" "$BACKEND_ENV_FILE"; do
   mode="$(stat -c %a "$file")"
   [[ "$mode" =~ ^(400|440|600|640)$ ]] || { echo 'Environment file permissions must be 0600 or 0640 (or read-only)' >&2; exit 2; }

@@ -27,6 +27,50 @@ RELEASE_GIT_SHA="$(git -C "$root" rev-parse HEAD)"
 export RELEASE_GIT_SHA
 [[ "$RELEASE_GIT_SHA" =~ ^[a-f0-9]{40}$ && "$MIGRATIONS_REVIEWED_SHA" == "$RELEASE_GIT_SHA" ]] || { echo 'Migration review does not match the release commit' >&2; exit 2; }
 
+# Trigger provenance. The automatic path (workflow_run) can never initialise an empty database
+# or self-approve destructive migrations; both remain manual-dispatch decisions.
+: "${RELEASE_TRIGGER:=workflow_dispatch}"
+: "${DESTRUCTIVE_MIGRATIONS_REVIEWED:=false}"
+[[ "$RELEASE_TRIGGER" == workflow_run || "$RELEASE_TRIGGER" == workflow_dispatch ]] || { echo 'RELEASE_TRIGGER must be workflow_run or workflow_dispatch' >&2; exit 2; }
+[[ "$DESTRUCTIVE_MIGRATIONS_REVIEWED" == true || "$DESTRUCTIVE_MIGRATIONS_REVIEWED" == false ]] || { echo 'DESTRUCTIVE_MIGRATIONS_REVIEWED must be true or false' >&2; exit 2; }
+if [[ "$RELEASE_TRIGGER" == workflow_run ]]; then
+  [[ "$INITIAL_EMPTY_DB" == false ]] || { echo 'Automatic releases can never initialise an empty database' >&2; exit 2; }
+  [[ "$DESTRUCTIVE_MIGRATIONS_REVIEWED" == false ]] || { echo 'Automatic releases cannot carry a destructive-migration review' >&2; exit 2; }
+fi
+
+record_outcome() {
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'outcome=%s\ndeployed_sha=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+# Release ordering. CI runs can finish out of order; a commit that is an ancestor of the
+# currently deployed commit is never deployed over it. Unknown or rewritten history fails closed.
+previous_release=""
+if [[ -f "$RELEASE_STATE_DIR/current" ]]; then
+  previous_release="$(tr -d '[:space:]' < "$RELEASE_STATE_DIR/current")"
+  [[ "$previous_release" =~ ^[a-f0-9]{40}$ ]] || { echo 'Recorded deployed commit is malformed' >&2; exit 2; }
+  if [[ "$previous_release" == "$RELEASE_GIT_SHA" ]]; then
+    echo "Release commit $RELEASE_GIT_SHA is already the recorded deployment; re-verifying it"
+  elif ! git -C "$root" cat-file -e "${previous_release}^{commit}" 2>/dev/null; then
+    echo "Deployed commit $previous_release is absent from the release checkout history (shallow clone or rewritten main); refusing" >&2
+    exit 2
+  elif git -C "$root" merge-base --is-ancestor "$RELEASE_GIT_SHA" "$previous_release"; then
+    echo "Release commit $RELEASE_GIT_SHA is older than the deployed $previous_release; skipping so the newer release stays live"
+    record_outcome superseded "$previous_release"
+    exit 0
+  elif git -C "$root" merge-base --is-ancestor "$previous_release" "$RELEASE_GIT_SHA"; then
+    echo "Release commit descends from the deployed $previous_release"
+  else
+    echo "Deployed commit $previous_release and release commit $RELEASE_GIT_SHA have diverged histories; refusing" >&2
+    exit 2
+  fi
+fi
+
+# New migrations since the deployed commit must be additive unless a human reviewed them.
+python3 "$config/scripts/migration-guard.py" --repo "$root" --release "$RELEASE_GIT_SHA" \
+  --previous "$previous_release" --reviewed "$DESTRUCTIVE_MIGRATIONS_REVIEWED" --initial-empty-db "$INITIAL_EMPTY_DB"
+
 # No Compose operation is allowed before server, DNS, TLS, role, and resource checks pass.
 bash "$config/scripts/preflight-ec2.sh"
 compose=(docker compose --env-file "$DEPLOY_ENV_FILE" -f "$config/compose.yaml" -f "$config/staging.compose.yaml" -f "$config/ghcr.compose.yaml" -p "$COMPOSE_PROJECT_NAME")
@@ -77,4 +121,5 @@ fi
 temp="$(mktemp "$RELEASE_STATE_DIR/.current.XXXXXX")"
 printf '%s\n' "$RELEASE_GIT_SHA" > "$temp"
 mv -- "$temp" "$RELEASE_STATE_DIR/current"
+record_outcome deployed "$RELEASE_GIT_SHA"
 echo "Deployment healthy at commit $RELEASE_GIT_SHA"

@@ -70,9 +70,49 @@ jobs:
           VITE_APP_MODE: demo
       - run: npm audit --omit=dev --audit-level=high
 
+  release_tooling:
+    # Lints both workflows and the EC2 release scripts, and runs their unit tests, on a hosted
+    # runner. Nothing here touches the self-hosted runner or the live host.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # Full history: the migration guard diffs the whole migration history below.
+          fetch-depth: 0
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+      - name: ShellCheck release scripts
+        run: shellcheck --severity=warning deploy/scripts/*.sh
+      - name: Release tooling tests
+        run: python3 -m unittest discover -s deploy/scripts -p 'test_*.py' -v
+      - name: Migration guard accepts the committed migration history
+        run: |
+          set -Eeuo pipefail
+          # Every migration in history must classify as additive or the live release will stop
+          # and ask for a manual review; surface that in CI rather than at deploy time.
+          # Exit 3 (destructive, unreviewed) is a warning here; exit 2 (tampered history) fails CI.
+          rc=0
+          python3 deploy/scripts/migration-guard.py --repo . --previous "$(git rev-list --max-parents=0 HEAD | tail -n1)" --release "$(git rev-parse HEAD)" --reviewed false || rc=$?
+          if [[ "$rc" -eq 3 ]]; then
+            echo '::warning::This commit adds a destructive migration; automatic deployment will stop and require a manual dispatch with destructive_migrations_reviewed=true.'
+          elif [[ "$rc" -ne 0 ]]; then
+            exit "$rc"
+          fi
+      - name: Compose release configuration removes build contexts
+        env:
+          RELEASE_GIT_SHA: 0000000000000000000000000000000000000000
+          STAGING_HOST: example.invalid
+          BACKEND_ENV_FILE: /dev/null
+        run: |
+          set -Eeuo pipefail
+          printf 'POSTGRES_DB=ci\nPOSTGRES_USER=ci\nPOSTGRES_PASSWORD=ci\nVITE_SUPABASE_URL=https://example.invalid\nVITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci\nSTAGING_HOST=example.invalid\n' > "$RUNNER_TEMP/compose.env"
+          docker compose --env-file "$RUNNER_TEMP/compose.env" -f deploy/compose.yaml -f deploy/staging.compose.yaml -f deploy/ghcr.compose.yaml -p ci-config-check config --format json \
+            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert all("build" not in s[n] for n in ("migrate","backend","web")), "build contexts leaked"; print("ok: no build contexts for", sorted(s))'
+
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, frontend]
+    needs: [backend, frontend, release_tooling]
     runs-on: ubuntu-latest
     permissions:
       contents: read

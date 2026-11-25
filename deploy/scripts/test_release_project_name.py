@@ -20,7 +20,7 @@ class ProjectIdentityTests(unittest.TestCase):
             RELEASE_STATE_DIR="/nonexistent/state",
         )
         return subprocess.run(
-            ["bash", str(SCRIPT)], env=env, text=True,
+            [os.environ.get("BASH", "bash"), str(SCRIPT)], env=env, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
         )
 

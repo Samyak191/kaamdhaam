@@ -11,7 +11,7 @@ SCRIPT = Path(__file__).with_name("dns-check.sh")
 class DnsCheckTests(unittest.TestCase):
     def run_check(self, host, expected, attempts="2"):
         env = dict(os.environ, DNS_CHECK_ATTEMPTS=attempts, DNS_CHECK_DELAY_SECONDS="0")
-        return subprocess.run(["bash", str(SCRIPT), host, expected], env=env, text=True,
+        return subprocess.run([os.environ.get("BASH", "bash"), str(SCRIPT), host, expected], env=env, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
     def test_localhost_resolves_to_loopback(self):

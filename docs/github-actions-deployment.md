@@ -1,6 +1,6 @@
 # GitHub Actions to existing Sydney EC2: release procedure
 
-This is the current CI/CD plan for the **existing** `ap-southeast-2` Amazon Linux 2023 `t3.small` host and its `kaamdhaam-ec2-runner`. It replaces the older Mumbai/t3.medium *provisioning proposal* for deployment purposes. No new EC2, IAM, bucket, DNS, or Supabase resource is created by this repository change. The host is not deployed yet.
+This is the current CI/CD procedure for the **existing** `ap-southeast-2` Amazon Linux 2023 `t3.small` host and its `kaamdhaam-ec2-runner`. It replaces the older Mumbai/t3.medium *provisioning proposal* for deployment purposes. No new EC2, IAM, bucket, DNS, or Supabase resource is created by this repository change. The host serves `https://kaam-dhaam.in`; see [Automatic releases](#automatic-releases-enabled-25-november-2026) for the push-to-deploy flow.
 
 ## Pipeline and safety boundary
 
@@ -66,15 +66,56 @@ On the EC2 host, prepare the following **before clicking Run workflow**:
 1. `/etc/kaamdhaam/compose.env`, readable by the runner and mode `0600` or `0640`, based on `deploy/.env.example`. Fill `POSTGRES_DB`, `POSTGRES_USER`, a unique `POSTGRES_PASSWORD`, `STAGING_HOST`, and the exact dedicated `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY`. Add `BACKEND_ENV_FILE=/etc/kaamdhaam/backend.env`. If the host already has a KaamDhaam database, retain its **actual existing** database name, user and password; never change them to match an example.
 2. `/etc/kaamdhaam/backend.env`, also mode `0600` or `0640`, based on `deploy/backend.env.example`. Set `DATABASE_URL=postgresql://<user>:<URL-encoded-password>@db:5432/<db>?schema=public`, `CORS_ORIGINS=https://<staging-host>`, `NODE_ENV=production`, `TRUST_PROXY_HOPS=1`, and the matching Supabase issuer/JWKS. Do not use a service-role key or a symmetric JWT secret; the API verifies the dedicated project's JWKS.
 3. `/opt/kaamdhaam/state`, owned and writable by the runner service account. The release records `current` and `previous` verified commit SHAs here only after health checks pass. Keep this directory across checkouts.
-4. DNS A record points to the approved EC2 public IP; 80/443 can reach Caddy, while 22, 4000, 5432 and 8080 are not publicly open. Verify Caddy configuration, TLS hostname ownership, Supabase Site URL and exact redirect allowlist for `/login`, `/onboarding`, `/reset-password`, and the instance-role-only S3 backup prefix. The first trusted certificate is issued when Caddy starts; the post-start smoke check must verify HTTPS before the release is accepted.
-5. Confirm at least 6 GiB free in Docker's filesystem and at least 512 MiB available RAM on the 2 GiB host. The workflow **pulls** app images; it does not build them there. The age helper is a small local backup image. Monitor memory and disk after release; `t3.small` headroom remains an operational risk.
-6. Review pending Prisma SQL migrations. Confirm the database volume's current state, backup recipient/key custody, and S3 restore access. The fixed approved project name is `kaamdham-beta`, so the volume is `kaamdham-beta_postgres_data`. Never run `down -v`, `migrate reset`, or `db push`.
+4. `/opt/kaamdhaam/backups`, owned by the runner service account with mode `0700`. Pre-migration encrypted backups are written here (`BACKUP_OUTPUT_DIR` in `deploy.yml`) before upload; preflight refuses to start if it is absent or not writable.
+5. DNS A record points to the approved EC2 public IP; 80/443 can reach Caddy, while 22, 4000, 5432 and 8080 are not publicly open. Verify Caddy configuration, TLS hostname ownership, Supabase Site URL and exact redirect allowlist for `/login`, `/onboarding`, `/reset-password`, and the instance-role-only S3 backup prefix. The first trusted certificate is issued when Caddy starts; the post-start smoke check must verify HTTPS before the release is accepted.
+6. Confirm at least 6 GiB free in Docker's filesystem and at least 512 MiB available RAM on the 2 GiB host. The workflow **pulls** app images; it does not build them there. The age helper is a small local backup image. Monitor memory and disk after release; `t3.small` headroom remains an operational risk.
+7. Review pending Prisma SQL migrations. Confirm the database volume's current state, backup recipient/key custody, and S3 restore access. The fixed approved project name is `kaamdham-beta`, so the volume is `kaamdham-beta_postgres_data`. Never run `down -v`, `migrate reset`, or `db push`.
 
 The `preflight-ec2.sh` script checks env consistency without printing values, file permissions, DNS, resource headroom, Caddy config, and IAM-role S3 access **before any Compose operation**. `ghcr.compose.yaml` removes all app build contexts from Compose. An existing database volume always gets an encrypted S3 backup before `prisma migrate deploy`. If no volume exists, the manual `initial_empty_db=true` input explicitly authorizes creating a new empty database. A mismatch stops the release. Compose then waits for database health, the one-shot migration's successful completion, and backend/web health. HTTPS smoke and running revision labels must pass before recording the release as verified.
 
 ### Manual first release
 
 After the CI/CD commit is pushed **with separate user approval**, let the automatic `main` CI and GHCR publish jobs pass. In GitHub Actions, run **Deploy staging** on `main` with `deploy_to_ec2=true`, `reviewed_sha` equal to the displayed full 40-character commit SHA, and `initial_empty_db=true` **only if no KaamDhaam PostgreSQL volume exists**. Otherwise choose false. The hosted verification job checks that the existing SHA-tagged images are available before the gated EC2 job starts. Do not start it while any prerequisite above is unverified. The workflow fails closed on missing variables/files, image tags, backup access, disk/RAM, migration failure or HTTPS health failure.
+
+## Automatic releases (enabled 25 November 2026)
+
+The first manual release of commit `26ac4935b55a799cae6e7cf293c1789c074a0dbb` succeeded on 24 November 2026 and the site serves `https://kaam-dhaam.in` (the `staging` labels in the workflow and environment are historical). From this commit on, **a push to `main` updates the live site without any manual GitHub Actions step**:
+
+```mermaid
+flowchart LR
+  Push[Push to main] --> CI[CI: backend, frontend, release tooling]
+  CI --> Publish[GHCR images tagged with the commit SHA]
+  Publish -->|workflow_run success| Gate[Hosted gate: trusted trigger, commit on main, images exist]
+  Gate --> Runner[Sydney runner: checkout exact SHA]
+  Runner --> Order[Ordering guard against /opt/kaamdhaam/state/current]
+  Order --> Guard[Migration guard: additive only]
+  Guard --> Preflight[Env, DNS, RAM, disk, Caddy, S3 role]
+  Preflight --> Backup[Encrypted backup, verified in S3]
+  Backup --> Migrate[prisma migrate deploy]
+  Migrate --> Smoke[HTTPS routes, API health, headers, certificate, revisions]
+  Smoke --> Record[state/current = SHA]
+```
+
+**Trigger trust.** `deploy.yml` listens for `workflow_run` completions of `CI`. GitHub always runs a `workflow_run` workflow from the default branch's copy of the file, so a pull request cannot edit the deployment workflow it triggers. The `gate` job starts only when the CI run **succeeded**, was a **`push`** event, its head branch is **`main`**, and its head repository is this repository (forks and pull-request CI runs never match). The same conditions are re-tested in the shell, and the hosted gate then checks that the commit is reachable from `origin/main` and that all three `ghcr.io/samyak191/kaamdhaam-{migrate,backend,web}:<sha>` images exist. Only then does the self-hosted job start, checking out exactly that SHA with full history.
+
+**Ordering.** CI runs can finish out of order. On the host, `release-ghcr.sh` compares the candidate with `/opt/kaamdhaam/state/current`: a candidate that is an ancestor of the deployed commit is **skipped** (the run reports `outcome=superseded` and exits successfully without touching containers); a descendant proceeds; the same commit is re-verified; unknown or diverged history fails closed. The workflow-level `kaamdhaam-ec2-deploy` concurrency group never cancels a running release and keeps only the newest queued one.
+
+**Database protection.** The automatic path hard-codes `INITIAL_EMPTY_DB=false` and `DESTRUCTIVE_MIGRATIONS_REVIEWED=false`; the release script independently rejects any `workflow_run` release that carries either flag as `true`. An existing `kaamdham-beta_postgres_data` volume is required, an encrypted backup is uploaded and read back from S3 before `prisma migrate deploy`, and `migration-guard.py` diffs `backend/prisma/migrations` between the deployed and candidate commits. New SQL containing `DROP TABLE/COLUMN/SCHEMA/TYPE`, `TRUNCATE`, `DELETE`, `UPDATE`, column type changes, `SET NOT NULL`, renames, or a Prisma `Warnings:` header stops the automatic release with exit code 3; a modified or deleted already-applied migration always fails (exit 2). CI runs the same guard over the full history and emits a warning on the commit that introduces a destructive migration, so you learn before the deploy stops.
+
+**Shipping a destructive migration.** Review the SQL and the data impact, confirm a fresh backup and an isolated restore test, then run **Deploy staging** manually on `main` with `deploy_to_ec2=true`, `reviewed_sha=<full SHA>`, `initial_empty_db=false`, `destructive_migrations_reviewed=true`. Manual dispatch is also the recovery path if the automatic release is ever disabled; it goes through the identical gate, ordering and backup steps.
+
+**Health verification.** A release is recorded only after `smoke.sh` passes over public HTTPS: `/`, `/login`, `/signup`, `/jobs`, `/talent`, `/reset-password`, `/v1/health` (body `status: ok`) and `/v1/ready` all return 200, `nosniff` and HSTS headers are present, the certificate is trusted and valid for at least 14 more days, and the running `backend`/`web` containers carry the release SHA in their revision label. The workflow repeats the smoke test after the script and prints `release-status.sh` (container state, health, restart counts, revisions, volume, disk, redacted logs) on success and failure. The job summary shows trigger, candidate, outcome and the recorded live commit.
+
+### Required GitHub settings (cannot be expressed in YAML)
+
+These are repository settings; verify them in the GitHub UI because the runner has Docker access on the production host:
+
+1. **Ruleset on `main`**: block force pushes and restrict deletions (minimum). The ordering guard refuses rewritten history, so a force push would stop automatic releases until resolved manually. Add "Require status checks" (`backend`, `frontend`, `release_tooling`) and "Require a pull request" only when changes arrive through pull requests; required checks reject direct pushes of new commits. CI already gates every deployment regardless.
+2. **Actions → General → Fork pull request workflows**: set "Require approval for all outside collaborators" (the public repository default only covers first-time contributors). Never approve a fork workflow run that changes `runs-on` to the self-hosted labels.
+3. **Actions → General → Workflow permissions**: "Read repository contents and packages permissions"; leave "Allow GitHub Actions to create and approve pull requests" off.
+4. **Environment `staging`**: add a deployment branch policy allowing only `main`. Do not add required reviewers unless you want every automatic release to wait for a click.
+5. **Runner**: repository-level runners cannot be restricted per workflow. If outside contributors are ever granted write access, move the runner to an organisation runner group restricted to this repository, or make the repository private. Until then, every account with write access can run code on the EC2 host by pushing to `main`.
+6. **GHCR packages**: keep the three packages linked to the repository with Actions read access; the deploy job uses only the short-lived `GITHUB_TOKEN`.
 
 ### Rollback
 

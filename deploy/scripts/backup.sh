@@ -15,7 +15,14 @@ if [[ -n "${BACKUP_S3_URI:-}" ]]; then
 fi
 
 output_dir="${BACKUP_OUTPUT_DIR:-$config/backups}"
-mkdir -p "$output_dir"
+if [[ -n "${BACKUP_OUTPUT_DIR:-}" ]]; then
+  # A release passes an existing runner-owned directory outside the checkout; never create or
+  # re-own it here. The default inside the checkout is only for local drills.
+  [[ "$BACKUP_OUTPUT_DIR" == /* ]] || { echo 'BACKUP_OUTPUT_DIR must be an absolute path' >&2; exit 2; }
+  [[ -d "$output_dir" && -w "$output_dir" ]] || { echo 'BACKUP_OUTPUT_DIR missing or not writable by the runner' >&2; exit 2; }
+else
+  mkdir -p "$output_dir"
+fi
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 destination="$output_dir/${COMPOSE_PROJECT_NAME}-${stamp}.dump.age"
 partial="${destination}.partial"
@@ -35,5 +42,17 @@ if [[ -n "${BACKUP_S3_URI:-}" ]]; then
   role_aws=(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE -u AWS_DEFAULT_PROFILE -u AWS_ROLE_ARN -u AWS_WEB_IDENTITY_TOKEN_FILE -u AWS_CONTAINER_CREDENTIALS_RELATIVE_URI -u AWS_CONTAINER_CREDENTIALS_FULL_URI -u AWS_EC2_METADATA_DISABLED AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_CONFIG_FILE=/dev/null aws)
   "${role_aws[@]}" s3 cp --only-show-errors --sse AES256 "$destination" "$BACKUP_S3_URI/$(basename "$destination")"
   "${role_aws[@]}" s3 cp --only-show-errors --sse AES256 "${destination}.sha256" "$BACKUP_S3_URI/$(basename "$destination").sha256"
+  # A successful upload is proven by reading the object back, not by the absence of an error.
+  bucket="${BACKUP_S3_URI#s3://}"; bucket="${bucket%%/*}"
+  key="${BACKUP_S3_URI#s3://*/}/$(basename "$destination")"
+  remote_size="$("${role_aws[@]}" s3api head-object --bucket "$bucket" --key "$key" --query 'ContentLength' --output text)"
+  [[ "$remote_size" == "$(stat -c %s "$destination")" ]] || { echo 'Uploaded backup size does not match the local encrypted file' >&2; exit 1; }
+  echo "Encrypted backup verified in S3: $(basename "$destination") (${remote_size} bytes)"
+  # Keep only the newest local copies once off-host storage is confirmed; S3 holds the history.
+  keep="${BACKUP_LOCAL_KEEP:-3}"
+  [[ "$keep" =~ ^[1-9][0-9]*$ ]] || { echo 'BACKUP_LOCAL_KEEP must be a positive integer' >&2; exit 2; }
+  find "$output_dir" -maxdepth 1 -type f -name "${COMPOSE_PROJECT_NAME}-*.dump.age" -printf '%T@ %p\n' \
+    | sort -rn | awk -v keep="$keep" 'NR > keep {sub(/^[^ ]+ /, ""); print}' \
+    | while IFS= read -r old; do rm -f -- "$old" "${old}.sha256"; done
 fi
 echo "Encrypted backup complete: $destination"

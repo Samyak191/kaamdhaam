@@ -42,3 +42,24 @@ Restore **only** to a new isolated database, verify row counts, foreign keys and
 ## Monitoring and incident response
 
 Initial alert proposals: health unavailable for 2 minutes; readiness unavailable for 2 minutes; 5xx above 2% for 5 minutes with sufficient traffic; p95 over 2 seconds for 10 minutes; disk above 80%; backup older than 36 hours; repeated container restarts; TLS certificate under 14 days. Tune after observing real traffic. Monitor CPU, memory, EBS free space, PostgreSQL connections, HTTP latency and error rate, container restarts and AWS budget/credit usage. Keep access to logs restricted and set retention. On incident: stop risky rollout, preserve logs and request IDs, assess user impact, restore a compatible image or isolated database only after a reviewed recovery decision, then rotate any potentially exposed secrets and document the event. Rotate the Supabase publishable key only if needed; private keys and database credentials require coordinated updates to ignored deployment env and restart.
+
+## Continuous delivery, backup retention and recovery (25 November 2026)
+
+Every automatic or manual release of the live site runs `deploy/scripts/backup.sh` before `prisma migrate deploy` whenever the `kaamdham-beta_postgres_data` volume exists. The script streams `pg_dump -Fc` from the database container through `age` (public recipient only; the private identity is never on EC2 or in GitHub), writes `kaamdham-beta-<UTC stamp>.dump.age` plus a `.sha256`, uploads both to `s3://kaamdhaam-staging-backups-068152185887/backups/` with SSE-S3 using the EC2 instance role, and then reads the object back with `head-object` to confirm the stored size matches. A failed upload or size mismatch aborts the release before any migration runs. Releases write the local copy to `BACKUP_OUTPUT_DIR=/opt/kaamdhaam/backups`, an existing `github-runner`-owned `0700` directory outside the checkout; preflight fails closed if it is missing or not writable, and the scripts never create or re-own it. After a confirmed upload only the newest three local copies there are kept (`BACKUP_LOCAL_KEEP`); S3 is the system of record. The first object, `kaamdham-beta-20261125T065059Z.dump.age`, was produced by hand on 25 November 2026 and confirmed in S3.
+
+**Retention.** Objects accumulate one per release plus any manual runs. Add an S3 lifecycle rule on the `backups/` prefix (console or `put-bucket-lifecycle-configuration`) that keeps daily objects 30 days and transitions older ones to Glacier Instant Retrieval or expires them after 90 days, according to cost and RPO decisions; this requires AWS console or CLI credentials and is not applied by the repository. Keep bucket public access blocked and versioning or Object Lock enabled if ransomware resilience is required. Alert if the newest object is older than 36 hours of activity or if a release reports `Encrypted backup verified in S3` missing.
+
+**Restore drill (isolated, never over production).** From a workstation holding the age identity:
+
+```bash
+aws s3 cp s3://kaamdhaam-staging-backups-068152185887/backups/<file>.dump.age .
+aws s3 cp s3://kaamdhaam-staging-backups-068152185887/backups/<file>.dump.age.sha256 .
+sha256sum -c <file>.dump.age.sha256
+# Start an isolated database with a throwaway Compose project name, then:
+COMPOSE_PROJECT_NAME=kaamdham-restore AGE_IDENTITY_FILE=/secure/age-identity.txt \
+RESTORE_DB=kaamdham_restore_check BACKUP_FILE=./<file>.dump.age bash deploy/scripts/restore-check.sh
+```
+
+`restore-check.sh` validates the archive with `pg_restore -l` before creating a database, refuses the production database name, requires a `_restore_check` suffix, and restores with `--exit-on-error`. Verify table and row counts, then drop the throwaway project (`docker compose -p kaamdham-restore down`, without `-v` unless that isolated volume is intended to go). Run this drill after the first automatic release and then monthly.
+
+**Rollback.** Released image tags are never deleted, and `/opt/kaamdhaam/state/previous` holds the prior verified SHA. Application rollback is the server procedure in [github-actions-deployment.md](github-actions-deployment.md#rollback) and is only safe when the previous image is compatible with the current schema; migrations are never reversed automatically.

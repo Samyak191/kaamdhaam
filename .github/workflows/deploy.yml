@@ -1,9 +1,21 @@
 name: Deploy staging
+# Production host for https://kaam-dhaam.in. The "staging" label is historical.
+#
+# Automatic path: a successful CI run for a push to this repository's main branch deploys
+# that exact commit. workflow_run always executes this file from the default branch, so a
+# pull request can never substitute its own copy, and pull-request CI runs never match the
+# gate below (they are not `push` events on `main`).
+#
+# Manual path (kept for recovery): workflow_dispatch on main with explicit approvals.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_to_ec2:
-        description: 'Approve deployment of the published main commit to Sydney EC2'
+        description: 'Approve deployment of the published main commit to the Sydney EC2 host'
         type: boolean
         required: true
         default: false
@@ -12,7 +24,12 @@ on:
         type: string
         required: true
       initial_empty_db:
-        description: 'Confirm the first release has no existing PostgreSQL volume'
+        description: 'Confirm the first release has no existing PostgreSQL volume (never for the live site)'
+        type: boolean
+        required: true
+        default: false
+      destructive_migrations_reviewed:
+        description: 'A human reviewed destructive migrations in this release and a fresh backup is acceptable'
         type: boolean
         required: true
         default: false
@@ -20,59 +37,148 @@ on:
 permissions:
   contents: read
 
+# One release at a time. A newer queued release replaces an older queued one, and an active
+# release is never cancelled part-way through.
+concurrency:
+  group: kaamdhaam-ec2-deploy
+  cancel-in-progress: false
+
 jobs:
-  verify_images:
-    if: github.ref == 'refs/heads/main' && inputs.deploy_to_ec2 == true
+  gate:
+    name: Trusted release gate
+    if: >-
+      github.ref == 'refs/heads/main' && (
+        (github.event_name == 'workflow_dispatch' && inputs.deploy_to_ec2 == true)
+        || (
+          github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.head_repository.full_name == github.repository
+          && github.event.workflow_run.repository.full_name == github.repository
+        )
+      )
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: read
+    outputs:
+      release_sha: ${{ steps.resolve.outputs.release_sha }}
+      trigger: ${{ steps.resolve.outputs.trigger }}
+      initial_empty_db: ${{ steps.resolve.outputs.initial_empty_db }}
+      destructive_migrations_reviewed: ${{ steps.resolve.outputs.destructive_migrations_reviewed }}
     steps:
-      - name: Require reviewed main SHA
+      - name: Resolve the release commit from the trusted trigger
+        id: resolve
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          THIS_REPO: ${{ github.repository }}
+          DISPATCH_SHA: ${{ github.sha }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
-          RELEASE_SHA: ${{ github.sha }}
+          INPUT_INITIAL_EMPTY_DB: ${{ inputs.initial_empty_db }}
+          INPUT_DESTRUCTIVE_REVIEWED: ${{ inputs.destructive_migrations_reviewed }}
         run: |
-          test "$REVIEWED_SHA" = "$RELEASE_SHA"
-          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          set -Eeuo pipefail
+          case "$EVENT_NAME" in
+            workflow_run)
+              # Re-check the gate in the shell so a future edit to the `if:` cannot silently widen it.
+              test "$RUN_CONCLUSION" = success
+              test "$RUN_EVENT" = push
+              test "$RUN_HEAD_BRANCH" = main
+              test "$RUN_HEAD_REPO" = "$THIS_REPO"
+              release_sha="$RUN_HEAD_SHA"
+              initial_empty_db=false
+              destructive_reviewed=false
+              ;;
+            workflow_dispatch)
+              test "$REVIEWED_SHA" = "$DISPATCH_SHA"
+              release_sha="$DISPATCH_SHA"
+              initial_empty_db="$INPUT_INITIAL_EMPTY_DB"
+              destructive_reviewed="$INPUT_DESTRUCTIVE_REVIEWED"
+              ;;
+            *) echo "Unsupported trigger: $EVENT_NAME" >&2; exit 2 ;;
+          esac
+          [[ "$release_sha" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$initial_empty_db" == true || "$initial_empty_db" == false ]]
+          [[ "$destructive_reviewed" == true || "$destructive_reviewed" == false ]]
+          {
+            echo "release_sha=$release_sha"
+            echo "trigger=$EVENT_NAME"
+            echo "initial_empty_db=$initial_empty_db"
+            echo "destructive_migrations_reviewed=$destructive_reviewed"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release candidate $release_sha via $EVENT_NAME"
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require the release commit to be on main
+        env:
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+        run: |
+          set -Eeuo pipefail
+          git cat-file -e "${RELEASE_SHA}^{commit}"
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          echo "Commit $RELEASE_SHA is reachable from origin/main ($(git rev-parse --short origin/main))"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify CI-published images exist
+      - name: Verify CI-published images exist for this exact commit
         env:
-          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
         run: |
+          set -Eeuo pipefail
           for service in migrate backend web; do
             docker buildx imagetools inspect "ghcr.io/samyak191/kaamdhaam-${service}:${RELEASE_SHA}" > /dev/null
+            echo "found ghcr.io/samyak191/kaamdhaam-${service}:${RELEASE_SHA}"
           done
 
   deploy:
-    if: github.ref == 'refs/heads/main' && inputs.deploy_to_ec2 == true
-    needs: [verify_images]
+    name: Deploy to Sydney EC2
+    needs: [gate]
+    if: needs.gate.result == 'success' && needs.gate.outputs.release_sha != ''
     runs-on: [self-hosted, Linux, X64, kaamdhaam-deploy]
-    environment: staging
-    concurrency:
-      group: kaamdhaam-ec2-deploy
-      cancel-in-progress: false
+    environment:
+      name: staging
+      url: https://kaam-dhaam.in
     timeout-minutes: 30
     permissions:
       contents: read
       packages: read
+    env:
+      RELEASE_SHA: ${{ needs.gate.outputs.release_sha }}
+      # The database volume identity must never depend on a mutable variable.
+      COMPOSE_PROJECT_NAME: kaamdham-beta
+      DEPLOY_ENV_FILE: /etc/kaamdhaam/compose.env
+      BACKEND_ENV_FILE: /etc/kaamdhaam/backend.env
+      RELEASE_STATE_DIR: /opt/kaamdhaam/state
+      # Existing runner-owned (0700) directory; pre-migration backups land here before S3 upload.
+      BACKUP_OUTPUT_DIR: /opt/kaamdhaam/backups
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.gate.outputs.release_sha }}
+          # Full history lets the release script prove ordering against the deployed commit
+          # and diff migrations since it.
+          fetch-depth: 0
           persist-credentials: false
-      - name: Pull and deploy the reviewed commit
+      - name: Pull and deploy the verified commit
+        id: release
         shell: bash
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          # The database volume identity must never depend on a mutable variable.
-          COMPOSE_PROJECT_NAME: kaamdham-beta
+          RELEASE_TRIGGER: ${{ needs.gate.outputs.trigger }}
           CONFIGURED_COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
           STAGING_HOST: ${{ vars.STAGING_HOST }}
           # The Elastic IP is fixed infrastructure; the repository variable is diagnostic only.
@@ -83,14 +189,15 @@ jobs:
           AGE_RECIPIENT: ${{ vars.AGE_RECIPIENT }}
           BACKUP_S3_URI: ${{ vars.BACKUP_S3_URI }}
           AWS_DEFAULT_REGION: ap-southeast-2
-          DEPLOY_ENV_FILE: /etc/kaamdhaam/compose.env
-          BACKEND_ENV_FILE: /etc/kaamdhaam/backend.env
-          RELEASE_STATE_DIR: /opt/kaamdhaam/state
-          MIGRATIONS_REVIEWED_SHA: ${{ inputs.reviewed_sha }}
-          INITIAL_EMPTY_DB: ${{ inputs.initial_empty_db }}
+          MIGRATIONS_REVIEWED_SHA: ${{ needs.gate.outputs.release_sha }}
+          INITIAL_EMPTY_DB: ${{ needs.gate.outputs.initial_empty_db }}
+          DESTRUCTIVE_MIGRATIONS_REVIEWED: ${{ needs.gate.outputs.destructive_migrations_reviewed }}
         run: |
           set -Eeuo pipefail
           test "$RUNNER_NAME" = 'kaamdhaam-ec2-runner'
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          [[ "$RELEASE_TRIGGER" == workflow_run || "$RELEASE_TRIGGER" == workflow_dispatch ]]
+          [[ "$RELEASE_TRIGGER" != workflow_run || ( "$INITIAL_EMPTY_DB" == false && "$DESTRUCTIVE_MIGRATIONS_REVIEWED" == false ) ]]
           if [[ "$CONFIGURED_COMPOSE_PROJECT_NAME" != "$COMPOSE_PROJECT_NAME" ]]; then
             configured_bytes="$(printf '%s' "$CONFIGURED_COMPOSE_PROJECT_NAME" | wc -c)"
             if [[ -z "$CONFIGURED_COMPOSE_PROJECT_NAME" ]]; then issue=missing
@@ -114,3 +221,38 @@ jobs:
           trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin >/dev/null
           bash deploy/scripts/release-ghcr.sh
+      - name: Post-release verification
+        if: always()
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.release.outputs.outcome }}
+          DEPLOYED_SHA: ${{ steps.release.outputs.deployed_sha }}
+          RELEASE_TRIGGER: ${{ needs.gate.outputs.trigger }}
+          RELEASE_RESULT: ${{ steps.release.outcome }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          RELEASE_GIT_SHA: ${{ needs.gate.outputs.release_sha }}
+        run: |
+          set -Eeuo pipefail
+          echo "release step: $RELEASE_RESULT; outcome: ${OUTCOME:-none}"
+          # Show more log context when the release failed.
+          if [[ "$RELEASE_RESULT" == success ]]; then export STATUS_LOG_LINES=20; else export STATUS_LOG_LINES=120; fi
+          bash deploy/scripts/release-status.sh || echo 'release-status.sh could not complete'
+          {
+            echo "## KaamDhaam release"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Trigger | \`$RELEASE_TRIGGER\` |"
+            echo "| Candidate commit | \`$RELEASE_GIT_SHA\` |"
+            echo "| Release step | $RELEASE_RESULT |"
+            echo "| Outcome | ${OUTCOME:-failed-before-health-verification} |"
+            echo "| Live commit (recorded) | \`$(tr -d '[:space:]' < "$RELEASE_STATE_DIR/current" 2>/dev/null || echo unknown)\` |"
+            echo "| Site | https://${STAGING_HOST} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$RELEASE_RESULT" == success && "$OUTCOME" == deployed ]]; then
+            # Independent confirmation from the workflow, not only from the release script.
+            export STAGING_ORIGIN="https://${STAGING_HOST}"
+            bash deploy/scripts/smoke.sh
+            test "$(tr -d '[:space:]' < "$RELEASE_STATE_DIR/current")" = "$RELEASE_GIT_SHA"
+            echo "Verified: https://${STAGING_HOST} serves commit $RELEASE_GIT_SHA"
+          fi
